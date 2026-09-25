@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from .models import Product, StockMovement
 
@@ -30,4 +31,9 @@ class StockMovementSerializer(serializers.ModelSerializer):
         request = self.context["request"]
         validated_data["shop"] = request.user.shop
         validated_data["created_by"] = request.user
-        return super().create(validated_data)
+        try:
+            return super().create(validated_data)
+        except DjangoValidationError as e:
+            # Model.save() anbar kifayət etmədikdə Django-nun ValidationError-unu atır;
+            # DRF-in bunu avtomatik tutmaması 500-ə səbəb olurdu — burada düzgün 400-ə çeviririk.
+            raise serializers.ValidationError({"quantity_delta": e.messages})
