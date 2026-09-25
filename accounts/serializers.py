@@ -28,10 +28,27 @@ class RolePermissionSerializer(serializers.ModelSerializer):
 
 class RoleSerializer(serializers.ModelSerializer):
     permissions = RolePermissionSerializer(many=True, read_only=True)
+    user_count = serializers.IntegerField(source="users.count", read_only=True)
 
     class Meta:
         model = Role
-        fields = ["id", "name", "is_owner_role", "permissions"]
+        fields = ["id", "name", "is_owner_role", "permissions", "user_count"]
+        read_only_fields = ["id", "is_owner_role"]
+
+
+class SetPermissionsSerializer(serializers.Serializer):
+    """PATCH /api/roles/{id}/permissions/ body: {"permissions": [{"module": "cashbox", "is_allowed": false}, ...]}"""
+    permissions = RolePermissionSerializer(many=True)
+
+    def save(self):
+        role = self.context["role"]
+        if role.is_owner_role:
+            raise serializers.ValidationError("Sahib rolunun icazələri dəyişdirilə bilməz.")
+        for item in self.validated_data["permissions"]:
+            RolePermission.objects.update_or_create(
+                role=role, module=item["module"], defaults={"is_allowed": item["is_allowed"]}
+            )
+        return role
 
 
 class MeSerializer(serializers.ModelSerializer):
@@ -57,6 +74,49 @@ class MeSerializer(serializers.ModelSerializer):
         if obj.role.is_owner_role:
             return list(Module.values)
         return list(obj.role.permissions.filter(is_allowed=True).values_list("module", flat=True))
+
+
+class UserWriteSerializer(serializers.ModelSerializer):
+    """İstifadəçilər səhifəsi: yeni işçi/şagird yaratmaq və ya rolunu/statusunu dəyişmək üçün.
+    Login mağaza-daxilində unikaldır (məs. rustem.sagird); mağaza kodu view tərəfindən əlavə olunur."""
+    password = serializers.CharField(write_only=True, required=False, min_length=6)
+    role_id = serializers.PrimaryKeyRelatedField(source="role", queryset=Role.objects.all(),
+                                                  write_only=True, required=False, allow_null=True)
+    shop = ShopMiniSerializer(read_only=True)
+    branch = BranchMiniSerializer(read_only=True)
+    role = RoleSerializer(read_only=True)
+    initials = serializers.ReadOnlyField()
+
+    class Meta:
+        model = User
+        fields = ["id", "username", "first_name", "last_name", "email", "phone",
+                  "password", "role", "role_id", "shop", "branch", "status",
+                  "initials", "date_joined", "last_seen_at"]
+        read_only_fields = ["id", "date_joined", "last_seen_at"]
+
+    def validate_role_id(self, role):
+        request = self.context.get("request")
+        if request and role.shop_id != request.user.shop_id:
+            raise serializers.ValidationError("Bu rol sizin mağazanıza aid deyil.")
+        return role
+
+    def create(self, validated_data):
+        password = validated_data.pop("password", None)
+        request = self.context["request"]
+        validated_data["shop"] = request.user.shop
+        validated_data["branch"] = request.user.branch
+        user = User(**validated_data)
+        user.set_password(password or User.objects.make_random_password(10))
+        user.save()
+        return user
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop("password", None)
+        user = super().update(instance, validated_data)
+        if password:
+            user.set_password(password)
+            user.save(update_fields=["password"])
+        return user
 
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
