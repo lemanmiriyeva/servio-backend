@@ -13,7 +13,7 @@ from .serializers import (
     MyTokenObtainPairSerializer, MeSerializer, RoleSerializer,
     UserWriteSerializer, SetPermissionsSerializer,
 )
-from .mixins import ShopScopedQuerysetMixin, HasModulePermission
+from .mixins import StrictShopScopedMixin, HasModulePermission
 from .models import Role, Module
 
 User = get_user_model()
@@ -36,9 +36,9 @@ class UserAdminSerializer(MeSerializer):
         fields = MeSerializer.Meta.fields + ["date_joined", "last_seen_at"]
 
 
-class UserViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
+class UserViewSet(StrictShopScopedMixin, viewsets.ModelViewSet):
     """İstifadəçilər / Rollar səhifəsi üçün — yalnız öz mağazanın istifadəçiləri."""
-    queryset = User.objects.select_related("role", "shop", "branch").all()
+    queryset = User.objects.select_related("role", "shop", "branch").filter(is_platform_admin=False).order_by("first_name", "username")
     permission_classes = [IsAuthenticated, HasModulePermission]
     module_code = Module.USERS
     filter_backends = [filters.SearchFilter]
@@ -54,6 +54,10 @@ class UserViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         ctx["request"] = self.request
         return ctx
 
+    def perform_create(self, serializer):
+        # UserWriteSerializer.create() shop-u özü təyin edir
+        serializer.save()
+
     def perform_destroy(self, instance):
         # Öz hesabını silə bilməz, Sahib rolunu silə bilməz.
         if instance.id == self.request.user.id:
@@ -63,7 +67,7 @@ class UserViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         instance.save(update_fields=["status", "is_active"])
 
 
-class RoleViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
+class RoleViewSet(StrictShopScopedMixin, viewsets.ModelViewSet):
     queryset = Role.objects.prefetch_related("permissions").all()
     serializer_class = RoleSerializer
     permission_classes = [IsAuthenticated, HasModulePermission]

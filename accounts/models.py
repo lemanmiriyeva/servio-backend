@@ -19,6 +19,13 @@ class Module(models.TextChoices):
     REVENUE_NUMBERS = "revenue_numbers", "Gəlir / net mənfəət rəqəmləri"
 
 
+# Yeni rol yaradılanda defolt açıq olan bölmələr (mağaza sahibi sonra "Rollar və icazələr"də dəyişə bilər).
+# Maliyyə/idarəetmə bölmələri (kassa, xərclər, borclar, hesabat, istifadəçilər, parametrlər, gəlir rəqəmləri) defolt bağlıdır.
+DEFAULT_ROLE_MODULES = {
+    Module.REPAIRS, Module.CUSTOMERS, Module.INVENTORY, Module.MARKETPLACE, Module.SUPPLIERS,
+}
+
+
 class Role(models.Model):
     """Hər mağaza öz rollarını qura bilər (default: Admin/Sahib, Usta, tələbə)."""
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name="roles")

@@ -9,6 +9,7 @@ from accounts.mixins import IsPlatformAdmin
 from tenants.models import Shop
 from .models import SupportTicket, SubscriptionPayment
 from .serializers import SupportTicketSerializer, SubscriptionPaymentSerializer
+from .resources import RESOURCES, build_meta
 
 
 class SupportTicketViewSet(viewsets.ModelViewSet):
@@ -42,3 +43,11 @@ class PlatformDashboardView(APIView):
             "mrr": mrr,
             "open_tickets": SupportTicket.objects.filter(status=SupportTicket.Status.OPEN).count(),
         })
+
+
+class PlatformResourcesView(APIView):
+    """GET /api/platform/resources/ — platforma panelindəki bütün bölmələr və onların sahə təsviri."""
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def get(self, request):
+        return Response([build_meta(r, request) for r in RESOURCES])

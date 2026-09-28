@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
+from django.utils.crypto import get_random_string
 
 from tenants.models import Shop, Branch
 from .models import Role, RolePermission, Module
@@ -57,14 +58,19 @@ class MeSerializer(serializers.ModelSerializer):
     role = RoleSerializer(read_only=True)
     initials = serializers.ReadOnlyField()
     allowed_modules = serializers.SerializerMethodField()
+    is_superadmin = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
             "id", "username", "first_name", "last_name", "email", "phone",
-            "shop", "branch", "role", "initials", "is_platform_admin", "status",
+            "shop", "branch", "role", "initials", "is_platform_admin", "is_superadmin", "status",
             "allowed_modules",
         ]
+
+    def get_is_superadmin(self, obj):
+        """Platforma bölməsinə yalnız bu hesablar daxil ola bilər."""
+        return bool(obj.is_platform_admin or obj.is_superuser)
 
     def get_allowed_modules(self, obj):
         if obj.is_platform_admin or obj.is_superuser:
@@ -96,9 +102,14 @@ class UserWriteSerializer(serializers.ModelSerializer):
 
     def validate_role_id(self, role):
         request = self.context.get("request")
-        if request and role.shop_id != request.user.shop_id:
+        if request and role is not None and role.shop_id != request.user.shop_id:
             raise serializers.ValidationError("Bu rol sizin mağazanıza aid deyil.")
         return role
+
+    def validate(self, attrs):
+        if self.instance is None and not attrs.get("role"):
+            raise serializers.ValidationError({"role_id": "Rol seçilməlidir — rolsuz istifadəçi heç bir bölməyə giriş əldə edə bilməz."})
+        return attrs
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
@@ -106,7 +117,7 @@ class UserWriteSerializer(serializers.ModelSerializer):
         validated_data["shop"] = request.user.shop
         validated_data["branch"] = request.user.branch
         user = User(**validated_data)
-        user.set_password(password or User.objects.make_random_password(10))
+        user.set_password(password or get_random_string(12))
         user.save()
         return user
 

@@ -70,7 +70,12 @@ class Shop(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.code:
-            self.code = slugify(self.name)[:60]
+            base = slugify(self.name)[:54] or "shop"
+            code, i = base, 2
+            while Shop.objects.filter(code=code).exclude(pk=self.pk).exists():
+                code = f"{base}-{i}"
+                i += 1
+            self.code = code
         if not self.logo_initials:
             parts = self.name.split()
             self.logo_initials = "".join(p[0] for p in parts[:2]).upper()

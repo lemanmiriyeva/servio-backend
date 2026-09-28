@@ -29,6 +29,24 @@ class ShopScopedQuerysetMixin:
         serializer.save(**save_kwargs)
 
 
+class StrictShopScopedMixin(ShopScopedQuerysetMixin):
+    """
+    İstifadəçilər/Rollar kimi mağaza-daxili səhifələr üçün: platforma admini də daxil olmaqla
+    HƏR KƏS yalnız öz mağazasının qeydlərini görür. Bütün mağazalar üzrə idarəetmə
+    `/api/platform/...` endpoint-lərindədir (yalnız super admin).
+    """
+
+    def get_queryset(self):
+        qs = super(ShopScopedQuerysetMixin, self).get_queryset()
+        user = self.request.user
+        if not user.shop_id:
+            return qs.none()
+        return qs.filter(**{self.shop_field: user.shop_id})
+
+    def perform_create(self, serializer):
+        serializer.save(**{self.shop_field: self.request.user.shop})
+
+
 class HasModulePermission(BasePermission):
     """
     ViewSet-ə `module_code = accounts.models.Module.XXX` təyin edin.
