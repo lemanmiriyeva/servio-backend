@@ -53,7 +53,7 @@ class DashboardView(APIView):
 
         recent = repairs.select_related("customer").order_by("-created_at")[:6]
 
-        return Response({
+        data = {
             "date": today,
             "customers_total": Customer.objects.filter(shop=shop).count(),
             "customers_new_this_week": Customer.objects.filter(
@@ -79,7 +79,15 @@ class DashboardView(APIView):
                     "sale_price": r.sale_price,
                 } for r in recent
             ],
-        })
+        }
+        # Gəlir rəqəmləri yalnız 'revenue_numbers' icazəsi olan rola göstərilir
+        # (məs. şəyird təmirləri görür, amma gəliri yox).
+        if not request.user.has_module_permission(Module.REVENUE_NUMBERS):
+            data["today_income"] = None
+            data["month_income"] = None
+            data["today_payments_count"] = None
+            data["revenue_hidden"] = True
+        return Response(data)
 
 
 class ReportsSummaryView(APIView):
@@ -88,6 +96,8 @@ class ReportsSummaryView(APIView):
     module_code = Module.REPORTS
 
     def get(self, request):
+        if not request.user.has_module_permission(Module.REVENUE_NUMBERS):
+            return Response({"detail": "Gəlir və mənfəət hesabatlarına icazəniz yoxdur."}, status=403)
         shop = request.user.shop
         today = timezone.now().date()
         start = request.query_params.get("start") or today.replace(day=1).isoformat()

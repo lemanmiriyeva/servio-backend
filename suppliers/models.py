@@ -37,6 +37,11 @@ class SupplierPurchase(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     purchased_at = models.DateField(default=timezone.now)
+    # Könüllü: alış hansı təmir üçün edilib (məs. Leman xanımın iPhone ekranı → iDoctor)
+    repair = models.ForeignKey(
+        "repairs.RepairOrder", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="supplier_purchases",
+    )
 
     class Meta:
         ordering = ["-purchased_at"]

@@ -34,6 +34,7 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
         source="customer", queryset=Customer.objects.all(), write_only=True
     )
     payments = RepairPaymentSerializer(many=True, read_only=True)
+    supplier_purchases = serializers.SerializerMethodField()
     paid_amount = serializers.ReadOnlyField()
     remaining_debt = serializers.ReadOnlyField()
     profit = serializers.ReadOnlyField()
@@ -50,10 +51,28 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
             "status", "payment_status", "debt_due_date",
             "warranty_days", "warranty_started_at", "warranty_end_date", "warranty_days_left",
             "received_at", "delivered_at",
-            "payments", "paid_amount", "remaining_debt",
+            "payments", "supplier_purchases", "paid_amount", "remaining_debt",
             "created_at",
         ]
         read_only_fields = ["id", "number", "created_at"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is not None and user.is_authenticated and not user.has_module_permission("revenue_numbers"):
+            # Maya və qazanc — 'Gəlir / net mənfəət rəqəmləri' icazəsi olmayan rola görünmür
+            data["cost_price"] = None
+            data["profit"] = None
+            data["supplier_purchases"] = []
+        return data
+
+    def get_supplier_purchases(self, obj):
+        return [
+            {"id": p.id, "supplier": p.supplier.name, "description": p.description,
+             "amount": p.amount, "paid_amount": p.paid_amount, "remaining": p.remaining}
+            for p in obj.supplier_purchases.select_related("supplier").all()
+        ]
 
     def create(self, validated_data):
         request = self.context["request"]

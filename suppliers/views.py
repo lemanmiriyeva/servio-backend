@@ -59,6 +59,11 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         from .serializers import SupplierPurchaseSerializer
         s = SupplierPurchaseSerializer(data=request.data)
         s.is_valid(raise_exception=True)
+        repair = s.validated_data.get("repair")
+        if repair is not None and repair.shop_id != supplier.shop_id:
+            return Response({"detail": "Bu təmir sizin mağazaya aid deyil."}, status=status.HTTP_400_BAD_REQUEST)
+        if s.validated_data.get("paid_amount", 0) > s.validated_data["amount"]:
+            return Response({"detail": "Ödənilən məbləğ alış məbləğindən çox ola bilməz."}, status=status.HTTP_400_BAD_REQUEST)
         s.save(shop=supplier.shop, supplier=supplier)
         fresh = self.get_queryset().get(pk=supplier.pk)
         return Response(SupplierSerializer(fresh).data, status=status.HTTP_201_CREATED)

@@ -1,5 +1,5 @@
 """
-İşlətmək üçün: python3 manage.py shell < seed_demo.py
+İşlətmək üçün: python manage.py seed_demo   (köhnə/pozuq məlumat üçün: python manage.py seed_demo --reset)
 Dizayndakı nümunə ilə eyni: TechFix Servis, Elvin Hüseynov.
 """
 import datetime
