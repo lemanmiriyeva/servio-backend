@@ -105,6 +105,29 @@ class RepairOrder(models.Model):
             return None
         return (end - timezone.now().date()).days
 
+    def recompute_payment_status(self, save=True):
+        """
+        Ödəniş statusunu real vəziyyətə uyğun yeniləyir — bax bölmə 9:
+        'Qalan məbləğ avtomatik olaraq müştərinin borclarına əlavə edilə bilər.'
+        Bu, tək yerdən idarə olunur ki, Borclar/Hesabatlar/Dashboard-un
+        `payment_status='debt'` filtri həmişə düzgün nəticə versin.
+        """
+        remaining = self.remaining_debt
+        if remaining <= 0:
+            new_status = PaymentStatus.PAID
+        elif self.status == RepairStatus.DELIVERED:
+            # Cihaz artıq təhvil verilib, amma tam ödənilməyib — bu, izlənməli borcdur.
+            new_status = PaymentStatus.DEBT
+        elif self.paid_amount > 0:
+            new_status = PaymentStatus.PARTIAL
+        else:
+            new_status = PaymentStatus.UNPAID
+        if new_status != self.payment_status:
+            self.payment_status = new_status
+            if save:
+                self.save(update_fields=["payment_status"])
+        return self.payment_status
+
     def __str__(self):
         return self.number
 

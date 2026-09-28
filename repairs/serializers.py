@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from customers.models import Customer
 from customers.serializers import CustomerSerializer
-from .models import RepairOrder, RepairPayment, RepairStatus, PaymentStatus
+from .models import RepairOrder, RepairPayment, RepairStatus
 
 
 class RepairPaymentSerializer(serializers.ModelSerializer):
@@ -75,6 +75,9 @@ class RepairStatusUpdateSerializer(serializers.Serializer):
             repair.delivered_at = timezone.now()
             repair.warranty_started_at = timezone.now().date()
         repair.save()
+        # Status dəyişəndə (xüsusən 'Təhvil verildi'-yə keçəndə) ödəniş statusunu
+        # yenidən hesabla — qalıq borc varsa indi 'debt' kimi işarələnəcək.
+        repair.recompute_payment_status()
         return repair
 
 
@@ -101,9 +104,5 @@ class RepairPaymentCreateSerializer(serializers.Serializer):
         # ona görə borcu düzgün hesablamaq üçün keşi təmizləyirik.
         if hasattr(repair, "_prefetched_objects_cache"):
             repair._prefetched_objects_cache.pop("payments", None)
-        if repair.remaining_debt <= 0:
-            repair.payment_status = PaymentStatus.PAID
-        else:
-            repair.payment_status = PaymentStatus.PARTIAL
-        repair.save(update_fields=["payment_status"])
+        repair.recompute_payment_status()
         return payment
