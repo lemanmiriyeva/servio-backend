@@ -59,6 +59,9 @@ class Command(BaseCommand):
 
         pro, _ = Plan.objects.get_or_create(name="Pro", defaults=dict(price_monthly=49, max_branches=5, max_users=15))
         Plan.objects.get_or_create(name="Basic", defaults=dict(price_monthly=19, max_branches=1, max_users=3))
+        starter, _ = Plan.objects.get_or_create(name="Starter", defaults=dict(price_monthly=0, max_branches=1, max_users=2))
+
+        admin = self.ensure_platform_admin()
 
         shop1, branch1, owner1 = self.ensure_shop(
             code="techfix", name="TechFix Servis", owner_name=("Elvin", "Hüseynov"), username="elvin.techfix",
@@ -74,20 +77,50 @@ class Command(BaseCommand):
             branch_name="Mərkəz filialı", plan=pro,
             extra=dict(address="Nizami prospekti 52, Gəncə", phone="+994222556677", work_hours="B.e – B. 09:00–18:00"),
         )
+        # Videoda "Platforma" bölməsinin boş görünməməsi üçün statusu fərqli 2 əlavə mağaza:
+        shop3, branch3, owner3 = self.ensure_shop(
+            code="quickfix-sumqayit", name="QuickFix Sumqayıt", owner_name=("Elşən", "Bağırov"),
+            username="elsen.quickfix", email="elsen@quickfix.az", phone="+994557778899", city="Sumqayıt",
+            branch_name="Mərkəz filialı", plan=starter,
+            extra=dict(address="Zavodlar küçəsi 3, Sumqayıt", phone="+994186623344", work_hours="B.e – Ş. 10:00–18:00"),
+            status=Shop.Status.TRIAL,
+        )
+        shop4, branch4, owner4 = self.ensure_shop(
+            code="repairpoint-seki", name="Repair Point Şəki", owner_name=("Aynur", "Vəliyeva"),
+            username="aynur.repairpoint", email="aynur@repairpoint.az", phone="+994703334455", city="Şəki",
+            branch_name="Mərkəz filialı", plan=pro,
+            extra=dict(address="M.Ə.Rəsulzadə küçəsi 9, Şəki", phone="+994242554433", work_hours="B.e – C. 09:00–18:00"),
+            status=Shop.Status.OVERDUE,
+        )
 
         self.seed_techfix(shop1, branch1, owner1)
         self.seed_gence(shop2, branch2, owner2)
+        self.seed_small_shop(shop3, branch3, owner3, prefix="qf")
+        self.seed_small_shop(shop4, branch4, owner4, prefix="rp")
         self.seed_marketplace(shop1, branch1, owner1, shop2, branch2, owner2)
-        self.seed_platform(shop1, shop2, pro)
+        self.seed_platform(shop1, shop2, shop3, shop4, pro)
 
         self.say("")
         self.say("Demo məlumatı hazırdır (hərflər UTF-8 ilə yazıldı).", self.style.SUCCESS)
-        self.say("  Mağaza 1: elvin.techfix / parol123  (TechFix Servis, Bakı)")
-        self.say("  Mağaza 2: vuqar.mobiltemir / parol123  (MobilTəmir Gəncə)")
+        self.say("")
+        self.say("VİDEO ÜÇÜN ƏSAS GİRİŞ (yadda saxlamaq asandır):")
+        self.say("  Mağaza paneli:    demo / demo1234   (TechFix Servis, Bakı — Sahib, hər şeyə icazəli)")
+        self.say("  Platforma paneli: admin / admin1234  (Bas Admin — bütün mağazaları idarə edir)")
+        self.say("")
+        self.say("Digər nümunə istifadəçilər (TechFix, rol/status müxtəlifliyi üçün):")
+        self.say("  rustem.usta / parol123    — Usta (aktiv)")
+        self.say("  zeyneb.kassir / parol123  — Kassir (aktiv)")
+        self.say("  orxan.anbar / parol123    — Anbardar (aktiv)")
+        self.say("  nermin.staj / parol123    — tələbə/stajçı (aktiv)")
+        self.say("  vasif.usta / parol123     — Usta (dəvət göndərilib, hələ giriş etməyib)")
+        self.say("  kamran.usta / parol123    — Usta (deaktiv edilmiş keçmiş işçi)")
+        self.say("")
+        self.say("Mağazalar: TechFix (aktiv), MobilTəmir Gəncə (aktiv), QuickFix Sumqayıt (sınaq), "
+                  "Repair Point Şəki (ödəniş gecikib)")
         self.say(
             f"  Təmir: {RepairOrder.objects.count()}, müştəri: {Customer.objects.count()}, "
             f"məhsul: {Product.objects.count()}, kassa əməliyyatı: {CashTransaction.objects.count()}, "
-            f"marketplace sifarişi: {MarketplaceOrder.objects.count()}"
+            f"marketplace sifarişi: {MarketplaceOrder.objects.count()}, istifadəçi: {User.objects.count()}"
         )
 
     # ------------------------------------------------------------------ wipe
@@ -117,15 +150,34 @@ class Command(BaseCommand):
         self.say("Köhnə məlumat təmizləndi (accounts və mağaza/filial saxlanıldı).")
 
     # ---------------------------------------------- shop/accounts: yalnız düzəlt
-    def ensure_shop(self, *, code, name, owner_name, username, email, phone, city, branch_name, plan, extra):
+    def ensure_platform_admin(self):
+        """Bas Admin — platforma panelində hər şeyi idarə edir. Video üçün sadə giriş: admin / admin1234."""
+        user = User.objects.filter(username="admin").first()
+        if user is None:
+            user = User(username="admin")
+        user.first_name, user.last_name = "Bas", "Admin"
+        user.email = "admin@serviscrm.az"
+        user.is_platform_admin = True
+        user.is_staff = True
+        user.is_superuser = True
+        user.set_password("admin1234")
+        user.save()
+        return user
+
+    def ensure_shop(self, *, code, name, owner_name, username, email, phone, city, branch_name, plan, extra,
+                     status=Shop.Status.ACTIVE):
         shop, _ = Shop.objects.get_or_create(code=code, defaults=dict(name=name, plan=plan))
         shop.name, shop.city, shop.plan = name, city, plan
         shop.owner_full_name = " ".join(owner_name)
         shop.owner_phone, shop.owner_email = phone, email
-        shop.status = Shop.Status.ACTIVE
+        shop.status = status
         shop.default_warranty_days = shop.default_warranty_days or 14
         shop.logo_initials = "".join(w[0] for w in name.split()[:2]).upper()
-        shop.next_payment_at = timezone.now().date() + datetime.timedelta(days=12)
+        shop.next_payment_at = timezone.now().date() + datetime.timedelta(
+            days=-3 if status == Shop.Status.OVERDUE else 12
+        )
+        if status == Shop.Status.TRIAL:
+            shop.trial_ends_at = timezone.now().date() + datetime.timedelta(days=9)
         for k, v in extra.items():
             setattr(shop, k, v)
         shop.save()
@@ -137,9 +189,6 @@ class Command(BaseCommand):
         branch.save()
 
         owner_role = self.ensure_role(shop, "Admin / Sahib", is_owner=True)
-        if shop.code == "techfix":
-            self.ensure_role(shop, "Usta", allowed=set(Module.values))
-            self.ensure_role(shop, "tələbə (stajçı)", allowed={Module.REPAIRS, Module.CUSTOMERS, Module.INVENTORY})
 
         user = User.objects.filter(username=username).first()
         if user is None:
@@ -151,6 +200,16 @@ class Command(BaseCommand):
         user.email, user.phone = email, phone
         user.save(update_fields=["first_name", "last_name", "email", "phone"])
         return shop, branch, user
+
+    def staff_user(self, shop, branch, *, username, first, last, role, password="parol123",
+                    status=User.Status.ACTIVE, phone=""):
+        """İşçi hesabı (usta, kassir, anbardar, stajçı ...) — idempotent, mövcuddursa yalnız mətni düzəldir."""
+        user = User.objects.filter(username=username).first()
+        if user is None:
+            user = User.objects.create_user(username=username, password=password, shop=shop, branch=branch, role=role)
+        user.first_name, user.last_name, user.role, user.phone, user.status = first, last, role, phone, status
+        user.save(update_fields=["first_name", "last_name", "role", "phone", "status"])
+        return user
 
     def ensure_role(self, shop, name, *, is_owner=False, allowed=None):
         roles = list(Role.objects.filter(shop=shop, is_owner_role=is_owner).order_by("id"))
@@ -219,6 +278,29 @@ class Command(BaseCommand):
 
     # ---------------------------------------------------------- TechFix Bakı
     def seed_techfix(self, shop, branch, owner):
+        owner_role = shop.roles.get(is_owner_role=True)
+        usta_role = self.ensure_role(shop, "Usta", allowed=set(Module.values) - {Module.SETTINGS, Module.USERS})
+        kassir_role = self.ensure_role(shop, "Kassir", allowed={Module.CASHBOX, Module.EXPENSES, Module.DEBTS, Module.CUSTOMERS})
+        anbardar_role = self.ensure_role(shop, "Anbardar", allowed={Module.INVENTORY, Module.MARKETPLACE, Module.SUPPLIERS})
+        stajci_role = self.ensure_role(shop, "tələbə (stajçı)", allowed={Module.REPAIRS, Module.CUSTOMERS, Module.INVENTORY})
+
+        # Video üçün əsas hesab: eyni mağazada, sahib rolunda, sadə giriş.
+        self.staff_user(shop, branch, username="demo", first="Demo", last="Hesabı", role=owner_role,
+                         password="demo1234", phone="+994500000000")
+
+        self.staff_user(shop, branch, username="rustem.usta", first="Rüstəm", last="Kərimov", role=usta_role,
+                         phone="+994557001122")
+        self.staff_user(shop, branch, username="zeyneb.kassir", first="Zeynəb", last="Quliyeva", role=kassir_role,
+                         phone="+994503002233")
+        self.staff_user(shop, branch, username="orxan.anbar", first="Orxan", last="Vəliyev", role=anbardar_role,
+                         phone="+994704003344")
+        self.staff_user(shop, branch, username="nermin.staj", first="Nərmin", last="Abbasova", role=stajci_role,
+                         phone="+994515004455")
+        self.staff_user(shop, branch, username="vasif.usta", first="Vasif", last="Tağıyev", role=usta_role,
+                         phone="+994556005566", status=User.Status.INVITED)
+        self.staff_user(shop, branch, username="kamran.usta", first="Kamran", last="Nəbiyev", role=usta_role,
+                         phone="+994707006677", status=User.Status.DISABLED)
+
         names = [
             ("Rəşad Məmmədov", "+994551234567", "Daimi müştəri."),
             ("Leman Bəşirova", "+994502345678", ""),
@@ -338,6 +420,13 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------- MobilTəmir Gəncə
     def seed_gence(self, shop, branch, owner):
+        usta_role = self.ensure_role(shop, "Usta", allowed=set(Module.values) - {Module.SETTINGS, Module.USERS})
+        kassir_role = self.ensure_role(shop, "Kassir", allowed={Module.CASHBOX, Module.EXPENSES, Module.DEBTS, Module.CUSTOMERS})
+        self.staff_user(shop, branch, username="turan.usta", first="Turan", last="Nəzərli", role=usta_role,
+                         phone="+994557008899")
+        self.staff_user(shop, branch, username="sevinc.kassir", first="Sevinc", last="Qarayeva", role=kassir_role,
+                         phone="+994508009900")
+
         c1 = Customer.objects.create(shop=shop, full_name="Ramin Nəsirov", phone="+994552001122")
         c2 = Customer.objects.create(shop=shop, full_name="Günay Abbasova", phone="+994702003344")
         self.repair(shop, branch, owner, c1, brand="Apple", model="iPhone 14", issue="Ekran dəyişdirilməsi",
@@ -353,6 +442,21 @@ class Command(BaseCommand):
         self.product(shop, "Şarj adapteri 20W", "", "Aksesuar", "ACC-20W", 25, 6, 15, min_alert=5, shared=True,
                      mp_price=12)
         CashboxOpeningBalance.objects.create(shop=shop, branch=branch, amount=800, as_of_date=ago(days=30).date())
+
+    # -------------------------------------------------- kiçik mağazalar (sınaq/gecikmiş)
+    def seed_small_shop(self, shop, branch, owner, *, prefix):
+        usta_role = self.ensure_role(shop, "Usta", allowed=set(Module.values) - {Module.SETTINGS, Module.USERS})
+        self.staff_user(shop, branch, username=f"{prefix}.usta", first="Fərid", last="Cəfərov", role=usta_role,
+                         phone="+994551112200")
+        c1 = Customer.objects.create(shop=shop, full_name="Anar Quliyev", phone="+994557001100")
+        c2 = Customer.objects.create(shop=shop, full_name="Lalə Məmmədova", phone="+994708002200")
+        self.repair(shop, branch, owner, c1, brand="Samsung", model="Galaxy A15", issue="Ekran dəyişdirilməsi",
+                    cost=95, sale=160, status=RepairStatus.IN_PROGRESS, received=ago(days=1))
+        self.repair(shop, branch, owner, c2, brand="Apple", model="iPhone 11", issue="Batareya dəyişdirilməsi",
+                    cost=35, sale=75, status=RepairStatus.DELIVERED, received=ago(days=5), delivered=ago(days=4),
+                    warranty=14, payments=[(75, CASH, ago(days=4))])
+        self.product(shop, "Universal batareya dəsti", "", "Batareya", f"BAT-{prefix.upper()}", 6, 20, 40)
+        CashboxOpeningBalance.objects.create(shop=shop, branch=branch, amount=200, as_of_date=ago(days=20).date())
 
     # ------------------------------------------------------------ marketplace
     def seed_marketplace(self, shop1, branch1, owner1, shop2, branch2, owner2):
@@ -384,9 +488,9 @@ class Command(BaseCommand):
         o.accept()  # ödəniş gözləyir
 
     # --------------------------------------------------------------- platform
-    def seed_platform(self, shop1, shop2, plan):
+    def seed_platform(self, shop1, shop2, shop3, shop4, plan):
         today = timezone.now().date()
-        for shop in (shop1, shop2):
+        for shop in (shop1, shop2, shop4):
             for months_back in (2, 1):
                 start = (today.replace(day=1) - datetime.timedelta(days=30 * (months_back - 1))).replace(day=1)
                 end = start + datetime.timedelta(days=29)
@@ -403,3 +507,9 @@ class Command(BaseCommand):
                                      status=SupportTicket.Status.IN_PROGRESS)
         SupportTicket.objects.create(shop=shop1, subject="Şifrəni unutmuşam", message="Usta üçün şifrə sıfırlandı.",
                                      status=SupportTicket.Status.CLOSED)
+        SupportTicket.objects.create(shop=shop3, subject="Planı necə yüksəldə bilərəm?",
+                                     message="Sınaq müddəti bitir, Pro plana keçmək istəyirəm.",
+                                     status=SupportTicket.Status.OPEN)
+        SupportTicket.objects.create(shop=shop4, subject="Ödəniş kartım bloklanıb",
+                                     message="Yeni kartla ödənişi necə edim?",
+                                     status=SupportTicket.Status.IN_PROGRESS)
