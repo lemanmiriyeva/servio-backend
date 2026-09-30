@@ -4,11 +4,26 @@ from django.utils.text import slugify
 
 
 class Plan(models.Model):
-    """Abunəlik planı (Basic, Pro və s.)"""
+    """Abunəlik planı (Basic, Pro və s.) — həm daxili abunə, həm də ictimai Qiymətlər
+    səhifəsi üçün istifadə olunur (public_* sahələri marketinq göstərimi üçündür)."""
     name = models.CharField(max_length=50, unique=True)
     price_monthly = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     max_branches = models.PositiveIntegerField(default=1)
     max_users = models.PositiveIntegerField(default=3)
+
+    # --- İctimai "Qiymətlər" səhifəsi üçün (Baş Admin idarə edir) ---
+    public_description = models.CharField(max_length=200, blank=True,
+                                            help_text="Qiymətlər səhifəsində planın altındakı qısa izah")
+    public_features = models.TextField(blank=True, help_text="Hər sətirdə bir üstünlük")
+    is_featured = models.BooleanField(default=False, help_text="\"Ən populyar\" kimi vurğulanır")
+    show_on_pricing_page = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "price_monthly"]
+
+    def public_features_list(self):
+        return [f.strip() for f in self.public_features.splitlines() if f.strip()]
 
     def __str__(self):
         return self.name

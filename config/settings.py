@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     "suppliers",
     "platform_admin",
     "reports",
+    "sitecontent",
 ]
 
 MIDDLEWARE = [
@@ -159,6 +160,7 @@ REST_FRAMEWORK = {
     # Giriş (login) sorğularına sürət limiti — şifrə güc-sınama (brute-force) hücumlarına qarşı.
     "DEFAULT_THROTTLE_RATES": {
         "login": "10/min",
+        "anon": "120/min",
     },
 }
 if not DEBUG:

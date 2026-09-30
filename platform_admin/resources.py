@@ -46,13 +46,14 @@ class Resource:
 
 PLATFORM = "Platforma"
 SERVICE = "Servis məlumatları"
+SITE = "İctimai sayt"
 
 RESOURCES = [
     Resource("shops", "tenants.Shop", "Mağazalar", PLATFORM,
              ["name", "code", "owner_full_name", "city", "plan", "status", "next_payment_at"],
              extra_kwargs={"code": {"required": False, "allow_blank": True}}),
     Resource("plans", "tenants.Plan", "Planlar", PLATFORM,
-             ["name", "price_monthly", "max_branches", "max_users"]),
+             ["name", "price_monthly", "max_branches", "max_users", "is_featured", "show_on_pricing_page"]),
     Resource("branches", "tenants.Branch", "Filiallar", PLATFORM,
              ["name", "shop", "phone", "is_main"]),
     Resource("users", "accounts.User", "İstifadəçilər", PLATFORM,
@@ -89,6 +90,19 @@ RESOURCES = [
              ["shop", "branch", "amount", "as_of_date"]),
     Resource("marketplace-orders", "marketplace.MarketplaceOrder", "Marketplace sifarişləri", SERVICE,
              ["buyer_shop", "seller_shop", "product", "quantity", "unit_price", "status", "created_at"]),
+
+    # İctimai sayt (Ana səhifə / Funksiyalar / Qiymətlər / Haqqımızda / FAQ / Əlaqə) məzmunu.
+    # Qiymətlər səhifəsi yuxarıdakı "plans" resursundan (tenants.Plan) qidalanır.
+    Resource("site-settings", "sitecontent.SiteSettings", "Sayt ayarları (loqo, əlaqə, hero)", SITE,
+             ["brand_name", "email", "phone", "address", "hours"]),
+    Resource("faq-items", "sitecontent.FaqItem", "FAQ sualları", SITE,
+             ["question", "order", "is_active"]),
+    Resource("feature-items", "sitecontent.FeatureItem", "Funksiya kartları", SITE,
+             ["title", "icon", "tone", "order", "is_active"]),
+    Resource("about-values", "sitecontent.AboutValue", "Haqqımızda dəyərləri", SITE,
+             ["title", "icon", "order", "is_active"]),
+    Resource("home-steps", "sitecontent.HomeStep", "Ana səhifə addımları", SITE,
+             ["number", "title", "order", "is_active"]),
 ]
 
 BY_KEY = {r.key: r for r in RESOURCES}
@@ -133,6 +147,13 @@ FIELD_LABELS = {
     "buyer_note": "Alıcı qeydi", "seller_note": "Satıcı qeydi", "responded_at": "Cavab tarixi",
     "completed_at": "Tamamlanma tarixi", "type": "Növ", "supplier": "Təchizatçı", "expense_category": "Xərc kateqoriyası",
     "paid_amount": "Ödənilən məbləğ", "purchased_at": "Alış tarixi", "as_of_date": "Tarix",
+    "public_description": "İzah (Qiymətlər səhifəsində)", "public_features": "Üstünlüklər (hər sətir — bir bənd)",
+    "is_featured": "Ən populyar kimi göstər", "show_on_pricing_page": "Qiymətlər səhifəsində göstər",
+    "sort_order": "Sıra", "order": "Sıra", "question": "Sual", "answer": "Cavab",
+    "icon": "İkon", "tone": "Rəng tonu", "short_description": "Qısa təsvir", "points": "Bəndlər (hər sətir — bir bənd)",
+    "brand_name": "Marka adı", "tagline": "Şüar", "logo": "Loqo", "hero_title": "Baş başlıq (hero)",
+    "hero_subtitle": "Alt başlıq (hero)", "whatsapp": "WhatsApp nömrəsi", "footer_note": "Footer qeydi",
+    "number": "Nömrə", "text": "Mətn", "updated_at": "Yenilənib",
 }
 
 

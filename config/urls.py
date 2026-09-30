@@ -16,6 +16,7 @@ urlpatterns = [
     path("api/marketplace/", include("marketplace.urls")),
     path("api/", include("reports.urls")),           # /api/dashboard/, /api/reports/summary/
     path("api/", include("tenants.urls")),           # /api/my-shop/, /api/branches/, /api/shops/ (Super Admin), /api/plans/
+    path("api/", include("sitecontent.urls")),       # /api/site-content/ — açıq, ictimai sayt üçün
 
     # Platform Super Admin (əlavə, platform/ prefiksli görünüş üçün)
     path("api/platform/", include("platform_admin.urls")),  # /api/platform/tickets/, /api/platform/dashboard/
