@@ -10,6 +10,7 @@ class TransactionType(models.TextChoices):
     INCOME = "income", "Gəlir"
     EXPENSE = "expense", "Xərc"
     SUPPLIER_PAYMENT = "supplier_payment", "Təchizatçı ödənişi"
+    REFUND = "refund", "Geri qaytarma (zəmanət)"
 
 
 class CashTransaction(models.Model):

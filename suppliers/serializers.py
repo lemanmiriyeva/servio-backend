@@ -21,9 +21,18 @@ class SupplierSerializer(serializers.ModelSerializer):
     total_purchased = serializers.ReadOnlyField()
     total_paid = serializers.ReadOnlyField()
     total_debt = serializers.ReadOnlyField()
+    pending_returns = serializers.SerializerMethodField()
 
     class Meta:
         model = Supplier
         fields = ["id", "name", "phone", "note", "purchases",
-                  "total_purchased", "total_paid", "total_debt", "created_at"]
+                  "total_purchased", "total_paid", "total_debt", "pending_returns", "created_at"]
         read_only_fields = ["id", "created_at"]
+
+    def get_pending_returns(self, obj):
+        from repairs.models import RepairWarrantyReturn, SupplierReturnStatus
+        from repairs.serializers import RepairWarrantyReturnSerializer
+        qs = RepairWarrantyReturn.objects.filter(
+            supplier_purchase__supplier=obj, supplier_status=SupplierReturnStatus.PENDING
+        ).select_related("repair", "repair__customer", "supplier_purchase")
+        return RepairWarrantyReturnSerializer(qs, many=True).data

@@ -30,6 +30,11 @@ class Product(models.Model):
         help_text="Digər mağazalara satış qiyməti (boşdursa unit_sale_price istifadə olunur)",
     )
 
+    is_scrap = models.BooleanField(
+        default=False,
+        help_text="Zəmanət altında qaytarılıb, təchizatçı qəbul etməyib — satışa çıxarılmır (Zay anbarı)",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -59,6 +64,7 @@ class MovementType(models.TextChoices):
     ADJUSTMENT = "adjustment", "Əl ilə düzəliş"
     MARKETPLACE_OUT = "marketplace_out", "Başqa mağazaya satış"
     MARKETPLACE_IN = "marketplace_in", "Başqa mağazadan alış"
+    WARRANTY_REJECTED_IN = "warranty_rejected_in", "Zəmanət qaytarması (təchizatçı qəbul etmədi)"
 
 
 class StockMovement(models.Model):

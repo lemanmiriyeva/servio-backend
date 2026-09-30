@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from customers.models import Customer
 from customers.serializers import CustomerSerializer
-from .models import RepairOrder, RepairPayment, RepairStatus
+from suppliers.models import SupplierPurchase
+from .models import RepairOrder, RepairPayment, RepairStatus, RepairWarrantyReturn, SupplierReturnStatus
 
 
 class RepairPaymentSerializer(serializers.ModelSerializer):
@@ -28,6 +29,86 @@ class RepairOrderListSerializer(serializers.ModelSerializer):
         ]
 
 
+class RepairWarrantyReturnSerializer(serializers.ModelSerializer):
+    repair_number = serializers.CharField(source="repair.number", read_only=True)
+    customer_name = serializers.CharField(source="repair.customer.full_name", read_only=True)
+    supplier_id = serializers.SerializerMethodField()
+    supplier_name = serializers.SerializerMethodField()
+    part_description = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RepairWarrantyReturn
+        fields = [
+            "id", "repair", "repair_number", "customer_name", "reason",
+            "refund_amount", "supplier_purchase", "supplier_id", "supplier_name",
+            "part_description", "return_amount", "supplier_status", "supplier_note",
+            "supplier_resolved_at", "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_supplier_id(self, obj):
+        return obj.supplier_purchase.supplier_id if obj.supplier_purchase_id else None
+
+    def get_supplier_name(self, obj):
+        return obj.supplier_purchase.supplier.name if obj.supplier_purchase_id else None
+
+    def get_part_description(self, obj):
+        return obj.supplier_purchase.description if obj.supplier_purchase_id else None
+
+
+class WarrantyReturnCreateSerializer(serializers.Serializer):
+    reason = serializers.CharField()
+    refund_amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0)
+    supplier_purchase_id = serializers.PrimaryKeyRelatedField(
+        source="supplier_purchase", queryset=SupplierPurchase.objects.all(), required=False, allow_null=True
+    )
+    return_amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0)
+    send_to_supplier = serializers.BooleanField(required=False, default=True)
+
+    def validate_supplier_purchase(self, sp):
+        request = self.context["request"]
+        if sp is not None and sp.shop_id != request.user.shop_id:
+            raise serializers.ValidationError("Bu alış sizin mağazaya aid deyil.")
+        return sp
+
+    def save(self, **kwargs):
+        request = self.context["request"]
+        repair: RepairOrder = self.context["repair"]
+        data = self.validated_data
+        supplier_purchase = data.get("supplier_purchase")
+        return_amount = data.get("return_amount") or (supplier_purchase.amount if supplier_purchase else 0)
+
+        wr = RepairWarrantyReturn.objects.create(
+            shop=repair.shop, repair=repair,
+            reason=data["reason"],
+            refund_amount=data.get("refund_amount") or 0,
+            supplier_purchase=supplier_purchase,
+            return_amount=return_amount,
+            created_by=request.user,
+        )
+        if wr.refund_amount and wr.refund_amount > 0:
+            from finance.models import CashTransaction, TransactionType
+            CashTransaction.objects.create(
+                shop=repair.shop, branch=repair.branch, type=TransactionType.REFUND,
+                amount=wr.refund_amount, method="cash",
+                description=f"{repair.number}, {repair.customer.full_name} — zəmanət qaytarması",
+                repair=repair, created_by=request.user,
+            )
+        if data.get("send_to_supplier", True) and wr.supplier_purchase_id:
+            wr.send_to_supplier()
+        return wr
+
+
+class SupplierReturnDecisionSerializer(serializers.Serializer):
+    decision = serializers.ChoiceField(choices=[SupplierReturnStatus.ACCEPTED, SupplierReturnStatus.REJECTED])
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def save(self, **kwargs):
+        wr: RepairWarrantyReturn = self.context["warranty_return"]
+        wr.resolve_supplier(self.validated_data["decision"], self.validated_data.get("note", ""))
+        return wr
+
+
 class RepairOrderDetailSerializer(serializers.ModelSerializer):
     customer = CustomerSerializer(read_only=True)
     customer_id = serializers.PrimaryKeyRelatedField(
@@ -35,6 +116,7 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
     )
     payments = RepairPaymentSerializer(many=True, read_only=True)
     supplier_purchases = serializers.SerializerMethodField()
+    warranty_returns = RepairWarrantyReturnSerializer(many=True, read_only=True)
     paid_amount = serializers.ReadOnlyField()
     remaining_debt = serializers.ReadOnlyField()
     profit = serializers.ReadOnlyField()
@@ -51,7 +133,7 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
             "status", "payment_status", "debt_due_date",
             "warranty_days", "warranty_started_at", "warranty_end_date", "warranty_days_left",
             "received_at", "delivered_at",
-            "payments", "supplier_purchases", "paid_amount", "remaining_debt",
+            "payments", "supplier_purchases", "warranty_returns", "paid_amount", "remaining_debt",
             "created_at",
         ]
         read_only_fields = ["id", "number", "created_at"]
@@ -65,6 +147,8 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
             data["cost_price"] = None
             data["profit"] = None
             data["supplier_purchases"] = []
+            for wr in data.get("warranty_returns", []):
+                wr["return_amount"] = None
         return data
 
     def get_supplier_purchases(self, obj):

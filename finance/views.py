@@ -35,11 +35,13 @@ class CashboxSummaryView(APIView):
         income = sum((t.amount for t in qs.filter(type=TransactionType.INCOME)), Decimal("0"))
         expense = sum((t.amount for t in qs.filter(type=TransactionType.EXPENSE)), Decimal("0"))
         supplier_payment = sum((t.amount for t in qs.filter(type=TransactionType.SUPPLIER_PAYMENT)), Decimal("0"))
+        refund = sum((t.amount for t in qs.filter(type=TransactionType.REFUND)), Decimal("0"))
 
         return Response({
             "opening_balance": opening_amount,
             "income": income,
             "expense": expense,
             "supplier_payment": supplier_payment,
-            "current_balance": opening_amount + income - expense - supplier_payment,
+            "refund": refund,
+            "current_balance": opening_amount + income - expense - supplier_payment - refund,
         })

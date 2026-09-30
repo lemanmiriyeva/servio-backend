@@ -114,6 +114,10 @@ class ReportsSummaryView(APIView):
             shop=shop, type=TransactionType.EXPENSE, created_at__date__gte=start, created_at__date__lte=end
         ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
 
+        refunds = (CashTransaction.objects.filter(
+            shop=shop, type=TransactionType.REFUND, created_at__date__gte=start, created_at__date__lte=end
+        ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+
         customer_debt = sum((r.remaining_debt for r in RepairOrder.objects.filter(
             shop=shop, payment_status=PaymentStatus.DEBT)), Decimal("0"))
         supplier_debt = sum((s.total_debt for s in Supplier.objects.filter(shop=shop)), Decimal("0"))
@@ -133,7 +137,8 @@ class ReportsSummaryView(APIView):
             "total_cost": total_cost,
             "total_profit": total_sales - total_cost,
             "total_expense": expenses,
-            "net_profit": (total_sales - total_cost) - expenses,
+            "total_refund": refunds,
+            "net_profit": (total_sales - total_cost) - expenses - refunds,
             "customer_debt_total": customer_debt,
             "supplier_debt_total": supplier_debt,
             "repair_count": repairs.count(),

@@ -150,3 +150,92 @@ class RepairPayment(models.Model):
 
     def __str__(self):
         return f"{self.repair.number} · {self.amount}"
+
+
+class SupplierReturnStatus(models.TextChoices):
+    NOT_SENT = "not_sent", "Təchizatçıya göndərilməyib"
+    PENDING = "pending", "Təchizatçıda gözləyir"
+    ACCEPTED = "accepted", "Təchizatçı qəbul etdi"
+    REJECTED = "rejected", "Təchizatçı rədd etdi"
+
+
+class RepairWarrantyReturn(models.Model):
+    """
+    Zəmanət müddətində qaytarılan hissə — məs. dəyişdirilmiş ekran yenidən sınıb.
+    Bu qeyd: (1) əvvəlki maya/mənfəəti düzəldir, (2) hissəni təchizatçıya geri
+    göndərməyi izləyir, (3) təchizatçının qəbul/rədd qərarına görə anbar və
+    maliyyəni yeniləyir.
+    """
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name="warranty_returns")
+    repair = models.ForeignKey(RepairOrder, on_delete=models.CASCADE, related_name="warranty_returns")
+    reason = models.TextField(help_text="Müştərinin şikayəti, məs. 'Ekran sensoru yenidən işləmir'")
+    refund_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Müştəriyə nağd qaytarılan məbləğ (varsa)",
+    )
+
+    supplier_purchase = models.ForeignKey(
+        "suppliers.SupplierPurchase", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="warranty_returns",
+    )
+    return_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Təchizatçıdan geri istənən hissənin dəyəri",
+    )
+    supplier_status = models.CharField(
+        max_length=20, choices=SupplierReturnStatus.choices, default=SupplierReturnStatus.NOT_SENT
+    )
+    supplier_note = models.CharField(max_length=255, blank=True)
+    supplier_resolved_at = models.DateTimeField(null=True, blank=True)
+
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def send_to_supplier(self):
+        if self.supplier_purchase_id and self.supplier_status == SupplierReturnStatus.NOT_SENT:
+            self.supplier_status = SupplierReturnStatus.PENDING
+            self.save(update_fields=["supplier_status"])
+
+    def resolve_supplier(self, decision: str, note: str = ""):
+        """Təchizatçının qərarı: qəbul (borc/maya düzəlişi) və ya rədd (Zay anbarına)."""
+        from decimal import Decimal
+        if decision not in (SupplierReturnStatus.ACCEPTED, SupplierReturnStatus.REJECTED):
+            raise ValueError("decision 'accepted' və ya 'rejected' olmalıdır.")
+
+        self.supplier_note = note
+        self.supplier_resolved_at = timezone.now()
+        self.supplier_status = decision
+
+        if decision == SupplierReturnStatus.ACCEPTED:
+            # Təchizatçı qəbul etdi — bu hissənin maya dəyəri artıq bu təmirin
+            # üzərinə yazılmamalıdır: alışı və təmirin maya dəyərini azaldırıq.
+            if self.supplier_purchase_id:
+                sp = self.supplier_purchase
+                sp.amount = max(sp.amount - self.return_amount, Decimal("0"))
+                sp.save(update_fields=["amount"])
+            self.repair.cost_price = max(self.repair.cost_price - self.return_amount, Decimal("0"))
+            self.repair.save(update_fields=["cost_price"])
+        else:
+            # Təchizatçı rədd etdi (məs. fiziki zədə, ləkə) — hissə Zay anbarına düşür,
+            # maya dəyəri təmirin üzərində qalır (dükan itkini öz üzərinə götürür).
+            from inventory.models import Product, StockMovement, MovementType
+            part_name = (self.supplier_purchase.description if self.supplier_purchase_id else self.reason)[:120]
+            product, created = Product.objects.get_or_create(
+                shop=self.shop, name=f"ZAY — {part_name}",
+                defaults={"category": "Zay / Qaytarılmış", "unit_cost": self.return_amount, "is_scrap": True},
+            )
+            if not product.is_scrap:
+                product.is_scrap = True
+                product.save(update_fields=["is_scrap"])
+            StockMovement.objects.create(
+                shop=self.shop, product=product, movement_type=MovementType.WARRANTY_REJECTED_IN,
+                quantity_delta=1, related_repair=self.repair,
+                note=f"{self.repair.number} — zəmanət qaytarması, təchizatçı qəbul etmədi ({note})".strip(),
+            )
+        self.save()
+
+    def __str__(self):
+        return f"{self.repair.number} — zəmanət qaytarması"
