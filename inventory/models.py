@@ -42,8 +42,11 @@ class Product(models.Model):
         ordering = ["name"]
         indexes = [models.Index(fields=["shop", "name"])]
         constraints = [
+            # `sku__gt=""` semantik olaraq `~Q(sku="")` (boş olmayan SKU) ilə eynidir,
+            # amma mssql-django-nun mənfi (NOT) şərtləri filtrlənmiş indeksə çevirərkən
+            # yanlış SQL sintaksisi yaratması problemini keçir.
             models.UniqueConstraint(fields=["shop", "sku"], name="unique_sku_per_shop",
-                                     condition=~models.Q(sku=""))
+                                     condition=models.Q(sku__gt=""))
         ]
 
     @property

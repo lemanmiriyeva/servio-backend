@@ -61,8 +61,14 @@ class MarketplaceOrder(models.Model):
     class Meta:
         ordering = ["-created_at"]
         constraints = [
-            models.CheckConstraint(condition=~models.Q(buyer_shop=models.F("seller_shop")),
-                                    name="marketplace_buyer_seller_differ"),
+            # "!=" mənasında mənfi (NOT) şərt yerinə iki tərəfli bərabərsizlik istifadə
+            # olunur — mssql-django mənfi Q şərtlərini filtrlənmiş indeks/CHECK-ə
+            # çevirərkən yanlış SQL sintaksisi yarada bilir (bax: inventory/models.py-dəki qeyd).
+            models.CheckConstraint(
+                condition=models.Q(buyer_shop__lt=models.F("seller_shop"))
+                | models.Q(buyer_shop__gt=models.F("seller_shop")),
+                name="marketplace_buyer_seller_differ",
+            ),
         ]
 
     @property
