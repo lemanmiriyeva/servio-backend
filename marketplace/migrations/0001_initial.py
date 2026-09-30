@@ -41,7 +41,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'ordering': ['-created_at'],
-                'constraints': [models.CheckConstraint(condition=models.Q(('buyer_shop', models.F('seller_shop')), _negated=True), name='marketplace_buyer_seller_differ')],
+                'constraints': [models.CheckConstraint(condition=models.Q(('buyer_shop__lt', models.F('seller_shop'))) | models.Q(('buyer_shop__gt', models.F('seller_shop'))), name='marketplace_buyer_seller_differ')],
             },
         ),
     ]

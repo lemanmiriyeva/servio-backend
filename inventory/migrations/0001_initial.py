@@ -73,6 +73,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='product',
-            constraint=models.UniqueConstraint(condition=models.Q(('sku', ''), _negated=True), fields=('shop', 'sku'), name='unique_sku_per_shop'),
+            constraint=models.UniqueConstraint(condition=models.Q(('sku__gt', '')), fields=('shop', 'sku'), name='unique_sku_per_shop'),
         ),
     ]
