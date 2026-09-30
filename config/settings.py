@@ -187,10 +187,14 @@ CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS") or (_default_dev_origins if D
 # DEBUG=0 olanda avtomatik aktivləşir; yerli inkişafda (DEBUG=1) bu
 # yoxlamalar HTTP üzərindən test etməyə mane olmasın deyə söndürülür.
 if not DEBUG:
-    SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=True)
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-    SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=31536000)
+    _https_enabled = env.bool("SECURE_SSL_REDIRECT", default=True)
+    SECURE_SSL_REDIRECT = _https_enabled
+    # "Secure" kukilər yalnız HTTPS üzərindən göndərilir — HTTP-only saytda (SECURE_SSL_REDIRECT=0)
+    # bunları True saxlasaydıq, brauzer sessiya/CSRF kukisini heç göndərməzdi və /admin/ daxil
+    # olmaq (həmçinin CSRF tələb edən istənilən forma) sürəkli "uğursuz giriş" kimi görünərdi.
+    SESSION_COOKIE_SECURE = _https_enabled
+    CSRF_COOKIE_SECURE = _https_enabled
+    SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=31536000) if _https_enabled else 0
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
