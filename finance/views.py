@@ -17,7 +17,10 @@ class CashTransactionViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, HasModulePermission]
     module_code = Module.CASHBOX
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["type"]
+    # "supplier" əlavə edildi — konkret təchizatçının ödəniş tarixçəsini
+    # (?supplier=<id>&type=supplier_payment) göstərmək üçün (əvvəllər yalnız
+    # "type" üzrə filtrləmək mümkün idi).
+    filterset_fields = ["type", "supplier", "repair"]
     ordering_fields = ["created_at"]
 
 

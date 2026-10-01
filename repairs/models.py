@@ -218,6 +218,23 @@ class RepairWarrantyReturn(models.Model):
                 sp.save(update_fields=["amount"])
             self.repair.cost_price = max(self.repair.cost_price - self.return_amount, Decimal("0"))
             self.repair.save(update_fields=["cost_price"])
+            # Müştəriyə geri ödənilən məbləğ (varsa) yaradılan zaman artıq Kassaya
+            # "Geri qaytarma" (REFUND, xərc kimi) yazılıb — bu, təkbaşına kassadan
+            # çıxış kimi qalırdı, təchizatçının kompensasiyası heç yerdə görünmürdü.
+            # Təchizatçı qəbul edəndə bu məbləği Kassaya gəlir kimi geri yazırıq ki,
+            # "itki" kimi görünən məbləğ faktiki olaraq necə bağlandığı izlənsin.
+            if self.return_amount and self.return_amount > 0:
+                from finance.models import CashTransaction, TransactionType
+                supplier = self.supplier_purchase.supplier if self.supplier_purchase_id else None
+                CashTransaction.objects.create(
+                    shop=self.shop, type=TransactionType.INCOME,
+                    amount=self.return_amount, method="cash",
+                    description=(
+                        f"{self.repair.number} — təchizatçı zəmanət kompensasiyası"
+                        + (f" ({supplier.name})" if supplier else "")
+                    ),
+                    repair=self.repair, supplier=supplier,
+                )
         else:
             # Təchizatçı rədd etdi (məs. fiziki zədə, ləkə) — hissə Zay anbarına düşür,
             # maya dəyəri təmirin üzərində qalır (dükan itkini öz üzərinə götürür).

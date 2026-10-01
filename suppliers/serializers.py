@@ -1,19 +1,35 @@
 from rest_framework import serializers
 from repairs.models import RepairOrder
-from .models import Supplier, SupplierPurchase
+from .models import Supplier, SupplierPurchase, SupplierPurchasePayment
+
+
+class SupplierPurchasePaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SupplierPurchasePayment
+        fields = ["id", "amount", "paid_at", "method"]
 
 
 class SupplierPurchaseSerializer(serializers.ModelSerializer):
     remaining = serializers.ReadOnlyField()
     repair = serializers.PrimaryKeyRelatedField(queryset=RepairOrder.objects.all(), required=False, allow_null=True)
     repair_number = serializers.CharField(source="repair.number", read_only=True, default=None)
+    customer_name = serializers.CharField(source="repair.customer.full_name", read_only=True, default=None)
     supplier_name = serializers.CharField(source="supplier.name", read_only=True)
+    payments = serializers.SerializerMethodField()
 
     class Meta:
         model = SupplierPurchase
         fields = ["id", "description", "amount", "paid_amount", "remaining", "purchased_at",
-                  "repair", "repair_number", "supplier", "supplier_name"]
+                  "repair", "repair_number", "customer_name", "supplier", "supplier_name", "payments"]
         read_only_fields = ["id", "supplier"]
+
+    def get_payments(self, obj):
+        rows = list(obj.payments.all())
+        if not rows and obj.paid_amount:
+            # Köhnə qeydlər (SupplierPurchasePayment yaradılmazdan əvvəl, məs. seed demo və ya
+            # alışla birlikdə ilkin ödəniş) üçün — ən azı alışın özündəki məbləği göstər.
+            return [{"id": None, "amount": obj.paid_amount, "paid_at": obj.purchased_at, "method": ""}]
+        return SupplierPurchasePaymentSerializer(rows, many=True).data
 
 
 class SupplierSerializer(serializers.ModelSerializer):

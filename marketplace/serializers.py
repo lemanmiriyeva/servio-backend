@@ -16,7 +16,7 @@ class MarketplaceProductSearchSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = ["id", "name", "brand", "category", "quantity_in_stock",
-                  "price", "shop_id", "shop_name", "shop_city"]
+                  "price", "is_used", "shop_id", "shop_name", "shop_city"]
 
 
 class MarketplaceOrderSerializer(serializers.ModelSerializer):

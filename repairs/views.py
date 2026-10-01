@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.http import HttpResponse
 from rest_framework import viewsets, filters, status, mixins
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -15,6 +17,33 @@ from .serializers import (
 )
 
 
+def _render_warranty_pdf(repair):
+    """
+    Zəmanət PDF-ni yaradır. Standart PDF şriftləri (Helvetica və s.) Azərbaycan
+    hərflərini (ə, ş, ğ, ı, ö, ü, ç) və "№" işarəsini çəkə bilmir — mətn boş
+    qutular kimi çıxır. Ona görə repo-ya əlavə olunmuş DejaVu Sans şriftini
+    (bütün bu simvolları əhatə edir) @font-face ilə PDF-ə göndəririk.
+    """
+    import io
+    import pathlib
+    from django.contrib.staticfiles import finders
+    from django.template.loader import render_to_string
+    from xhtml2pdf import pisa
+
+    def _font_uri(name):
+        path = finders.find(f"repairs/fonts/{name}")
+        return pathlib.Path(path).as_uri() if path else ""
+
+    html = render_to_string("repairs/warranty_pdf.html", {
+        "repair": repair, "shop": repair.shop,
+        "font_regular": _font_uri("DejaVuSans.ttf"),
+        "font_bold": _font_uri("DejaVuSans-Bold.ttf"),
+    })
+    buf = io.BytesIO()
+    pisa.CreatePDF(io.BytesIO(html.encode("utf-8")), dest=buf, encoding="utf-8")
+    return buf
+
+
 class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = RepairOrder.objects.select_related("customer").prefetch_related("payments").all()
     permission_classes = [IsAuthenticated, HasModulePermission]
@@ -26,6 +55,24 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
 
     def get_serializer_class(self):
         return RepairOrderDetailSerializer if self.action != "list" else RepairOrderListSerializer
+
+    @action(detail=False, methods=["get"], url_path="device-suggestions")
+    def device_suggestions(self, request):
+        """
+        Bu mağazanın əvvəlki təmirlərindən fərqli marka/model siyahısı — "Yeni xidmət"
+        formasında marka/model sahələrinin avtomatik tamamlanması (datalist) üçün.
+        """
+        qs = self.get_queryset()
+        brands = sorted({b for b in qs.values_list("device_brand", flat=True) if b})
+        models_by_brand: dict[str, list[str]] = {}
+        for brand, model in qs.values_list("device_brand", "device_model").distinct():
+            if not brand or not model:
+                continue
+            models_by_brand.setdefault(brand, [])
+            if model not in models_by_brand[brand]:
+                models_by_brand[brand].append(model)
+        all_models = sorted({m for ms in models_by_brand.values() for m in ms})
+        return Response({"brands": brands, "models": all_models, "models_by_brand": models_by_brand})
 
     @action(detail=True, methods=["post"], url_path="status")
     def set_status(self, request, pk=None):
@@ -57,6 +104,44 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         return Response(RepairOrderDetailSerializer(fresh, context={"request": request}).data,
                          status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["get"], url_path="warranty-pdf")
+    def warranty_pdf(self, request, pk=None):
+        """Zəmanət sənədini PDF kimi qaytarır (çap/yükləmə üçün)."""
+        repair = self.get_object()
+        buf = _render_warranty_pdf(repair)
+        # DİQQƏT: burada DRF-in Response() YOX, Django-nun HttpResponse()-u istifadə
+        # olunur — DRF Response() cavabı JSON renderer-dən keçirməyə çalışır, PDF
+        # baytlarını json.dumps() etmək isə "UnicodeDecodeError" ilə çökür.
+        resp = HttpResponse(buf.getvalue(), content_type="application/pdf")
+        resp["Content-Disposition"] = f'attachment; filename="zemanet-{repair.number}.pdf"'
+        return resp
+
+    @action(detail=True, methods=["post"], url_path="warranty-email")
+    def warranty_email(self, request, pk=None):
+        """Zəmanət sənədini PDF olaraq müştərinin e-poçtuna göndərir (göndərən: mağazanın info@ ünvanı)."""
+        from django.core.mail import EmailMessage
+
+        repair = self.get_object()
+        if not repair.customer.email:
+            return Response({"detail": "Bu müştərinin e-poçt ünvanı qeydə alınmayıb."}, status=400)
+
+        buf = _render_warranty_pdf(repair)
+
+        email = EmailMessage(
+            subject=f"{repair.shop.name} — Zəmanət sənədi ({repair.number})",
+            body=(
+                f"Salam {repair.customer.full_name},\n\n"
+                f"{repair.number} nömrəli xidmətinizin zəmanət sənədi əlavədədir.\n\n"
+                f"Hörmətlə,\n{repair.shop.name}"
+            ),
+            from_email=f"{repair.shop.name} <{settings.DEFAULT_FROM_EMAIL}>",
+            to=[repair.customer.email],
+            reply_to=[repair.shop.owner_email] if repair.shop.owner_email else None,
+        )
+        email.attach(f"zemanet-{repair.number}.pdf", buf.getvalue(), "application/pdf")
+        email.send(fail_silently=False)
+        return Response({"detail": "Göndərildi."})
+
     @action(detail=False, methods=["get"], url_path="warranties")
     def warranties(self, request):
         """'06 Zəmanətlər' səhifəsi — yalnız zəmanət başlamış (təhvil verilmiş) təmirlər."""
@@ -65,7 +150,9 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         for r in qs:
             data.append({
                 "id": r.id, "number": r.number,
+                "customer_id": r.customer_id,
                 "customer_name": r.customer.full_name, "customer_initials": r.customer.initials,
+                "customer_email": r.customer.email,
                 "device": f"{r.device_brand} {r.device_model}".strip(),
                 "work": r.issue_description,
                 "warranty_started_at": r.warranty_started_at,

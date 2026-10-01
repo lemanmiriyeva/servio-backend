@@ -20,10 +20,8 @@ from django.db.models import ProtectedError, RestrictedError
 from django.utils.crypto import get_random_string
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, serializers, status, viewsets
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, BasePermission
 from rest_framework.response import Response
-
-from accounts.mixins import IsPlatformAdmin
 
 
 @dataclass
@@ -35,6 +33,15 @@ class Resource:
     columns: list
     extra_kwargs: dict = field(default_factory=dict)
     exclude: tuple = ()
+    section: str = ""     # sidebar-da QRUPUN özü hansı üst bölmənin altında görünür (bax: SEC_*)
+    hidden: bool = False  # True olsa, sidebar-da AYRI bağlantı kimi göstərilmir (yalnız mağaza
+                           # kartının "Ətraflı" səhifəsində tab kimi, ya da başqa UI-dan çağırılır) —
+                           # amma API (/api/platform/r/<key>/) hər zaman işləyir.
+    shop_scoped: bool = False  # True olsa: (1) mağaza SAHİBİ rolu olan istifadəçi də bu resursa
+                                # /api/platform/r/<key>/ ilə daxil ola bilər, AMMA yalnız ÖZ
+                                # mağazasının qeydlərini görür/yaradır/redaktə edir (serverdə məcburi
+                                # `shop=request.user.shop` tətbiq olunur, client-in göndərdiyi `shop`
+                                # dəyəri nəzərə alınmır). Platform Super Admin isə həmişə hamısını görür.
     _model: Optional[type] = None
 
     @property
@@ -44,65 +51,155 @@ class Resource:
         return self._model
 
 
+# ----------------------------------------------------------------------------
+# Üst bölmələr (SEC_*) — sidebar-da bir-birindən vizual olaraq AYRILMIŞ 4 böyük blok.
+# Müştərinin tələbi: "Servis məlumatları" adlı qarışıq, bütün mağazaların datasının bir yerdə
+# göründüyü bölmə olmasın; əvəzinə hər mağazanın öz məlumatı "Mağazalar" bölməsindən o mağazaya
+# daxil olanda görünsün. Sayt məzmunu (marketinq saytı) və Planlar/Abunələr isə ayrı-ayrı,
+# aydın bölmələr kimi dursun.
+SEC_SHOPS = "Mağazalar"
+SEC_PLATFORM = "Platforma"
+SEC_PLANS = "Planlar və Abunələr"
+SEC_SITE = "Sayt məzmunu"
+
+# Qrup (sub-başlıq) — hər SEC_* bölməsinin daxilində sidebar-da görünən kiçik başlıqlar.
 PLATFORM = "Platforma"
-SERVICE = "Servis məlumatları"
-SITE = "İctimai sayt"
+SHOPS_GROUP = "Mağazalar"
+PLANS_GROUP = "Planlar və abunə ödənişləri"
+# İctimai (marketinq) saytın hər bölməsi üçün AYRI qrup — sidebar-da saytdakı səhifələrlə
+# bir-birinə birbaşa uyğun gəlsin deyə (əvvəllər hamısı tək "İctimai sayt" qrupunda idi,
+# qarışıq görünürdü). Hər qrup elə həmin adda açılan sayt səhifəsinə aiddir.
+SITE_HOME = "Sayt: Ana səhifə"
+SITE_FEATURES = "Sayt: Funksiyalar"
+SITE_ABOUT = "Sayt: Haqqımızda"
+SITE_FAQ = "Sayt: FAQ"
+SITE_CONTACT = "Sayt: Əlaqə"
+SITE_GENERAL = "Sayt: Loqo və marka"
 
+# Bir mağazanın "Ətraflı" (drill-down) səhifəsində tab kimi göstərilən, həmin mağazaya aid
+# resurslar. Bunlar sidebar-da AYRI bağlantı kimi görünmür (hidden=True) — çünki hamısı eyni
+# `shop` FK-sına malikdir və bir mağazanın içinə girəndə avtomatik `?shop=<id>` ilə filtrlənərək
+# açılır (bax: frontend `/platform/shops/[id]`). API-ları yenə işləkdir, sadəcə əsas sidebar-da
+# bütün mağazaların datası bir yerdə qarışıq göstərilmir.
 RESOURCES = [
-    Resource("shops", "tenants.Shop", "Mağazalar", PLATFORM,
-             ["name", "code", "owner_full_name", "city", "plan", "status", "next_payment_at"],
-             extra_kwargs={"code": {"required": False, "allow_blank": True}}),
-    Resource("plans", "tenants.Plan", "Planlar", PLATFORM,
-             ["name", "price_monthly", "max_branches", "max_users", "is_featured", "show_on_pricing_page"]),
-    Resource("branches", "tenants.Branch", "Filiallar", PLATFORM,
-             ["name", "shop", "phone", "is_main"]),
-    Resource("users", "accounts.User", "İstifadəçilər", PLATFORM,
-             ["username", "first_name", "last_name", "shop", "role", "status", "is_platform_admin"],
-             exclude=("groups", "user_permissions")),  # password: write-only, hash-lənir
-    Resource("roles", "accounts.Role", "Rollar", PLATFORM,
-             ["name", "shop", "is_owner_role"]),
-    Resource("role-permissions", "accounts.RolePermission", "Rol icazələri", PLATFORM,
-             ["role", "module", "is_allowed"]),
-    Resource("tickets", "platform_admin.SupportTicket", "Dəstək sorğuları", PLATFORM,
-             ["subject", "shop", "status", "created_at"]),
-    Resource("payments", "platform_admin.SubscriptionPayment", "Abunə ödənişləri", PLATFORM,
-             ["shop", "amount", "period_start", "period_end", "paid_at"]),
+    Resource("shops", "tenants.Shop", "Mağazalar", SHOPS_GROUP,
+             ["name", "code", "owner_full_name", "city", "plan", "status", "next_payment_at",
+              "is_active", "disabled_reason"],
+             extra_kwargs={"code": {"required": False, "allow_blank": True}},
+             section=SEC_SHOPS),
 
-    Resource("customers", "customers.Customer", "Müştərilər", SERVICE,
-             ["full_name", "phone", "shop", "created_at"]),
-    Resource("repairs", "repairs.RepairOrder", "Təmir sifarişləri", SERVICE,
-             ["number", "shop", "customer", "device_brand", "device_model", "status", "payment_status", "sale_price"]),
-    Resource("repair-payments", "repairs.RepairPayment", "Təmir ödənişləri", SERVICE,
-             ["repair", "amount", "method", "paid_at"]),
-    Resource("products", "inventory.Product", "Anbar məhsulları", SERVICE,
-             ["name", "brand", "shop", "quantity_in_stock", "unit_sale_price", "is_shared_to_marketplace"]),
-    Resource("stock-movements", "inventory.StockMovement", "Anbar hərəkətləri", SERVICE,
-             ["shop", "product", "movement_type", "quantity_delta", "created_at"]),
-    Resource("repair-parts", "inventory.RepairPartUsage", "Təmirdə işlənən hissələr", SERVICE,
-             ["repair", "product", "quantity", "unit_cost_at_use"]),
-    Resource("suppliers", "suppliers.Supplier", "Təchizatçılar", SERVICE,
-             ["name", "phone", "shop"]),
-    Resource("supplier-purchases", "suppliers.SupplierPurchase", "Təchizatçı alışları", SERVICE,
-             ["shop", "supplier", "description", "amount", "paid_amount", "purchased_at"]),
-    Resource("cash-transactions", "finance.CashTransaction", "Kassa əməliyyatları", SERVICE,
-             ["shop", "type", "amount", "method", "description", "created_at"]),
-    Resource("cash-opening-balances", "finance.CashboxOpeningBalance", "Kassa açılış qalıqları", SERVICE,
-             ["shop", "branch", "amount", "as_of_date"]),
-    Resource("marketplace-orders", "marketplace.MarketplaceOrder", "Marketplace sifarişləri", SERVICE,
-             ["buyer_shop", "seller_shop", "product", "quantity", "unit_price", "status", "created_at"]),
+    # -- Mağazaya aid, "Ətraflı" səhifəsində tab kimi açılan resurslar (sidebar-da gizlidir).
+    #    `shop_scoped=True` — mağazanın SAHİB (owner) rolu olan istifadəçisi də bunlara
+    #    /api/platform/r/<key>/ ilə daxil ola bilər, amma yalnız ÖZ mağazasının qeydlərinə. --
+    Resource("branches", "tenants.Branch", "Filiallar", SHOPS_GROUP,
+             ["name", "shop", "phone", "is_main"], section=SEC_SHOPS, hidden=True, shop_scoped=True),
+    Resource("customers", "customers.Customer", "Müştərilər", SHOPS_GROUP,
+             ["full_name", "phone", "shop", "created_at"], section=SEC_SHOPS, hidden=True, shop_scoped=True),
+    Resource("repairs", "repairs.RepairOrder", "Təmir sifarişləri", SHOPS_GROUP,
+             ["number", "shop", "customer", "device_brand", "device_model", "status", "payment_status", "sale_price"],
+             section=SEC_SHOPS, hidden=True, shop_scoped=True),
+    Resource("products", "inventory.Product", "Anbar məhsulları", SHOPS_GROUP,
+             ["name", "brand", "shop", "quantity_in_stock", "unit_sale_price", "is_shared_to_marketplace"],
+             section=SEC_SHOPS, hidden=True, shop_scoped=True),
+    Resource("stock-movements", "inventory.StockMovement", "Anbar hərəkətləri", SHOPS_GROUP,
+             ["shop", "product", "movement_type", "quantity_delta", "created_at"],
+             section=SEC_SHOPS, hidden=True, shop_scoped=True),
+    Resource("suppliers", "suppliers.Supplier", "Təchizatçılar", SHOPS_GROUP,
+             ["name", "phone", "shop"], section=SEC_SHOPS, hidden=True, shop_scoped=True),
+    Resource("supplier-purchases", "suppliers.SupplierPurchase", "Təchizatçı alışları", SHOPS_GROUP,
+             ["shop", "supplier", "description", "amount", "paid_amount", "purchased_at"],
+             section=SEC_SHOPS, hidden=True, shop_scoped=True),
+    Resource("cash-transactions", "finance.CashTransaction", "Kassa əməliyyatları", SHOPS_GROUP,
+             ["shop", "type", "amount", "method", "description", "created_at"],
+             section=SEC_SHOPS, hidden=True, shop_scoped=True),
+    Resource("cash-opening-balances", "finance.CashboxOpeningBalance", "Kassa açılış qalıqları", SHOPS_GROUP,
+             ["shop", "branch", "amount", "as_of_date"], section=SEC_SHOPS, hidden=True, shop_scoped=True),
+
+    # -- Platforma: birbaşa bir mağazaya aid olmayan / bir neçə mağazanı əhatə edən qeydlər.
+    #    İstifadəçilər və Rollar istisnadır: HƏM burada (bütün mağazalar üzrə, sidebar-da görünən,
+    #    yalnız Platform Super Admin üçün) HƏM DƏ hər mağazanın öz "Ətraflı" səhifəsində tab kimi
+    #    (yalnız öz mağazasına, `shop_scoped=True` ilə) görünür. --
+    Resource("users", "accounts.User", "İstifadəçilər", PLATFORM,
+             ["username", "first_name", "last_name", "shop", "role", "status",
+              "is_shop_admin", "is_platform_admin"],
+             exclude=("groups", "user_permissions"),  # password: write-only, hash-lənir
+             section=SEC_PLATFORM, shop_scoped=True),
+    Resource("roles", "accounts.Role", "Rollar", PLATFORM,
+             ["name", "shop", "is_owner_role"], section=SEC_PLATFORM, shop_scoped=True),
+    Resource("role-permissions", "accounts.RolePermission", "Rol icazələri", PLATFORM,
+             ["role", "module", "is_allowed"], section=SEC_PLATFORM),
+    Resource("tickets", "platform_admin.SupportTicket", "Dəstək sorğuları", PLATFORM,
+             ["subject", "shop", "status", "created_at"], section=SEC_PLATFORM),
+    Resource("repair-payments", "repairs.RepairPayment", "Təmir ödənişləri", PLATFORM,
+             ["repair", "amount", "method", "paid_at"], section=SEC_PLATFORM),
+    Resource("repair-parts", "inventory.RepairPartUsage", "Təmirdə işlənən hissələr", PLATFORM,
+             ["repair", "product", "quantity", "unit_cost_at_use"], section=SEC_PLATFORM),
+    Resource("marketplace-orders", "marketplace.MarketplaceOrder", "Marketplace sifarişləri", PLATFORM,
+             ["buyer_shop", "seller_shop", "product", "quantity", "unit_price", "status", "created_at"],
+             section=SEC_PLATFORM),
+
+    # -- Planlar və Abunələr: sırf Baş Admin ilə bağlı, mağazaların özünə aid olmayan bölmə --
+    Resource("plans", "tenants.Plan", "Planlar", PLANS_GROUP,
+             ["name", "price_monthly", "max_branches", "max_users", "is_featured", "show_on_pricing_page"],
+             section=SEC_PLANS),
+    Resource("payments", "platform_admin.SubscriptionPayment", "Abunə ödənişləri", PLANS_GROUP,
+             ["shop", "amount", "period_start", "period_end", "paid_at"], section=SEC_PLANS),
 
     # İctimai sayt (Ana səhifə / Funksiyalar / Qiymətlər / Haqqımızda / FAQ / Əlaqə) məzmunu.
-    # Qiymətlər səhifəsi yuxarıdakı "plans" resursundan (tenants.Plan) qidalanır.
-    Resource("site-settings", "sitecontent.SiteSettings", "Sayt ayarları (loqo, əlaqə, hero)", SITE,
-             ["brand_name", "email", "phone", "address", "hours"]),
-    Resource("faq-items", "sitecontent.FaqItem", "FAQ sualları", SITE,
-             ["question", "order", "is_active"]),
-    Resource("feature-items", "sitecontent.FeatureItem", "Funksiya kartları", SITE,
-             ["title", "icon", "tone", "order", "is_active"]),
-    Resource("about-values", "sitecontent.AboutValue", "Haqqımızda dəyərləri", SITE,
-             ["title", "icon", "order", "is_active"]),
-    Resource("home-steps", "sitecontent.HomeStep", "Ana səhifə addımları", SITE,
-             ["number", "title", "order", "is_active"]),
+    # Hər bölmə elə saytdakı həmin səhifənin adını daşıyır ki, admin panelində işləyən adam
+    # harada nəyi redaktə edəcəyini kod/model adına baxmadan anlasın. Planlar (yuxarıda) eyni
+    # zamanda ictimai Qiymətlər səhifəsini də qidalandırır.
+
+    # -- Ana səhifə: baş yazı (hero) + "necə işləyir" addımları --
+    Resource("home-hero", "sitecontent.SiteSettings", "Baş yazı (hero mətni)", SITE_HOME,
+             ["hero_title"],
+             exclude=("brand_name", "tagline", "logo", "email", "phone", "whatsapp",
+                       "address", "hours", "footer_note"),
+             section=SEC_SITE),
+    Resource("home-steps", "sitecontent.HomeStep", "\"Necə işləyir\" addımları", SITE_HOME,
+             ["number", "title", "order", "is_active"], section=SEC_SITE),
+
+    # -- Funksiyalar: Ana səhifə + Funksiyalar səhifəsindəki funksiya kartları --
+    Resource("feature-items", "sitecontent.FeatureItem", "Funksiya kartları", SITE_FEATURES,
+             ["title", "icon", "tone", "order", "is_active"], section=SEC_SITE),
+
+    # -- Haqqımızda: dəyər kartları --
+    Resource("about-values", "sitecontent.AboutValue", "Haqqımızda dəyərləri", SITE_ABOUT,
+             ["title", "icon", "order", "is_active"], section=SEC_SITE),
+
+    # -- FAQ: sual-cavablar --
+    Resource("faq-items", "sitecontent.FaqItem", "FAQ sualları", SITE_FAQ,
+             ["question", "order", "is_active"], section=SEC_SITE),
+
+    # -- Əlaqə: telefon/e-poçt/ünvan/iş saatları (Əlaqə səhifəsi + footer-də görünür) --
+    Resource("contact-info", "sitecontent.SiteSettings", "Əlaqə məlumatları", SITE_CONTACT,
+             ["email", "phone", "address"],
+             exclude=("brand_name", "tagline", "logo", "hero_title", "hero_subtitle", "footer_note"),
+             section=SEC_SITE),
+
+    # -- Loqo və marka: bütün səhifələrdə (header/footer) görünən ümumi brendinq --
+    Resource("site-branding", "sitecontent.SiteSettings", "Loqo və marka", SITE_GENERAL,
+             ["brand_name", "tagline"],
+             exclude=("hero_title", "hero_subtitle", "email", "phone", "whatsapp", "address", "hours"),
+             section=SEC_SITE),
+]
+
+# Mağazanın "Ətraflı" səhifəsində tab kimi göstərilən resurslar — bu sıra ilə, hamısı birbaşa
+# `shop` FK-sı ilə filtrlənir. Frontend bu siyahını sərt-kodlanmış saxlayır (sadəcə naviqasiya
+# təşkilatıdır, backend-dən ayrıca endpoint tələb etmir — mövcud `/api/platform/r/<key>/?shop=<id>`
+# kifayətdir).
+SHOP_DETAIL_TABS = [
+    ("customers", "Müştərilər"),
+    ("repairs", "Təmir sifarişləri"),
+    ("products", "Anbar"),
+    ("stock-movements", "Anbar hərəkətləri"),
+    ("suppliers", "Təchizatçılar"),
+    ("supplier-purchases", "Təchizatçı alışları"),
+    ("cash-transactions", "Kassa"),
+    ("cash-opening-balances", "Kassa açılış qalığı"),
+    ("branches", "Filiallar"),
+    ("users", "İstifadəçilər"),
+    ("roles", "Rollar"),
 ]
 
 BY_KEY = {r.key: r for r in RESOURCES}
@@ -126,7 +223,10 @@ FIELD_LABELS = {
     "price_monthly": "Aylıq qiymət", "max_branches": "Maks. filial", "max_users": "Maks. istifadəçi",
     "is_main": "Əsas filial", "is_owner_role": "Sahib rolu", "module": "Modul", "is_allowed": "İcazə verilib",
     "username": "Login", "first_name": "Ad", "last_name": "Soyad", "password": "Şifrə",
-    "is_platform_admin": "Platforma admini", "is_superuser": "Superuser", "is_staff": "Admin panelə giriş",
+    "is_platform_admin": "Platforma Super Admini (BÜTÜN mağazaları görür!)",
+    "is_superuser": "Superuser (texniki, Platforma Super Admini ilə eyni təsirə malikdir)",
+    "is_staff": "Admin panelə giriş",
+    "is_shop_admin": "Mağaza admini (Platforma panelinə — yalnız öz mağazası üçün giriş)",
     "last_login": "Son giriş", "date_joined": "Qoşulub", "last_seen_at": "Son görünmə",
     "subject": "Mövzu", "message": "Mesaj", "amount": "Məbləğ", "paid_at": "Ödəniş tarixi",
     "period_start": "Dövr başlanğıcı", "period_end": "Dövr sonu",
@@ -213,6 +313,41 @@ def build_serializer(res: Resource):
     return type(f"{model.__name__}PlatformSerializer", bases, attrs)
 
 
+def _is_shop_admin(user) -> bool:
+    """
+    Mağaza admini — `is_shop_admin=True` və bir mağazaya təyin edilib. Bu, Rol sistemindən
+    (Sahib/Usta və s.) TAMAM AYRI, sırf Platforma panelinə giriş üçün olan bir bayraqdır:
+    "Sahib" rolu mağaza-daxili modul icazələrini idarə edir, `is_shop_admin` isə YALNIZ bu
+    istifadəçinin öz mağazası üçün Platforma panelinə (bu modula) girə bilib-bilmədiyini həll edir.
+    """
+    return bool(user and user.is_authenticated and user.shop_id and user.is_shop_admin)
+
+
+class IsPlatformAdminOrShopOwner(BasePermission):
+    """
+    Platform Super Admin — hər resursa, bütün mağazalar üzrə.
+    Mağaza admini (`is_shop_admin=True`) — YALNIZ `shop_scoped=True` resurslara, və YALNIZ öz
+    mağazasının qeydlərinə (filtrləmə `get_queryset`-də, məcburi `shop` təyini
+    `perform_create/update`-də edilir).
+    """
+    message = "Bu bölməyə giriş icazəniz yoxdur."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_platform_admin or user.is_superuser:
+            return True
+        res: Resource = getattr(view, "platform_resource", None)
+        return bool(res and res.shop_scoped and _is_shop_admin(user))
+
+
+# Mağaza adminin `accounts.User` resursu üzərindən HEÇ VAXT açıb dəyişə bilmədiyi, imtiyaz
+# artırma riski daşıyan sahələr — yaratma/yeniləmə zamanı serverdə məcburi False-a sıfırlanır.
+# `is_shop_admin` də buradadır: kim mağaza admini olacağını YALNIZ Platform Super Admin təyin edir.
+_PRIVILEGE_FIELDS = ("is_platform_admin", "is_superuser", "is_staff", "is_shop_admin")
+
+
 def build_viewset(res: Resource):
     model = res.model
     ser = build_serializer(res)
@@ -235,10 +370,41 @@ def build_viewset(res: Resource):
     class PlatformViewSet(viewsets.ModelViewSet):
         queryset = qs
         serializer_class = ser
-        permission_classes = [IsAuthenticated, IsPlatformAdmin]
+        platform_resource = res
+        permission_classes = [IsAuthenticated, IsPlatformAdminOrShopOwner]
         filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
         filterset_fields = filter_fields
         ordering_fields = "__all__"
+
+        def get_queryset(self):
+            qs = super().get_queryset()
+            user = self.request.user
+            if user.is_platform_admin or user.is_superuser:
+                return qs
+            # Buraya yalnız shop_scoped resurslar üçün, mağaza sahibi kimi çatıla bilər (permission
+            # bunu artıq təmin edir) — hər ehtimala qarşı yenidən öz mağazası ilə filtrlənir.
+            return qs.filter(shop_id=user.shop_id)
+
+        def _shop_locked_kwargs(self):
+            """Mağaza sahibi üçün: `shop` həmişə özününkünə məcburi edilir, imtiyaz sahələri bağlanır."""
+            user = self.request.user
+            if user.is_platform_admin or user.is_superuser:
+                return {}
+            extra = {"shop_id": user.shop_id}
+            if model is apps.get_model("accounts.User"):
+                extra.update({f: False for f in _PRIVILEGE_FIELDS if hasattr(model, f)})
+            return extra
+
+        def perform_create(self, serializer):
+            instance = serializer.save(**self._shop_locked_kwargs())
+            # Abunə ödənişi qeydə alınanda mağaza avtomatik aktivləşir (bağlıdırsa) və
+            # növbəti ödəniş tarixi irəli aparılır — Baş Admin ayrıca "aç" düyməsinə
+            # basmasın deyə.
+            if res.key == "payments" and getattr(instance, "shop_id", None):
+                instance.shop.reactivate()
+
+        def perform_update(self, serializer):
+            serializer.save(**self._shop_locked_kwargs())
 
         def handle_exception(self, exc):
             if isinstance(exc, IntegrityError):
@@ -267,6 +433,8 @@ def build_viewset(res: Resource):
 
 
 def _field_type(f):
+    if isinstance(f, serializers.ImageField):
+        return "image"
     if isinstance(f, serializers.PrimaryKeyRelatedField):
         return "related"
     if isinstance(f, serializers.ChoiceField):
@@ -290,8 +458,17 @@ def _field_type(f):
 
 def build_meta(res: Resource, request=None):
     ser = build_serializer(res)(context={"request": request})
+    user = getattr(request, "user", None)
+    # `request=None` (daxili/introspeksiya çağırışı, məs. testlər) — qoruyacaq konkret istifadəçi
+    # olmadığı üçün tam sxem qaytarılır. Real HTTP sorğularında `request` HƏMİŞƏ ötürülür
+    # (bax: `PlatformResourcesView`), ona görə bu budaq heç vaxt anonim bir API cavabına çıxmır.
+    is_admin = request is None or bool(user and (user.is_platform_admin or user.is_superuser))
     fields = []
     for name, f in ser.fields.items():
+        # Mağaza sahibi `accounts.User` formunda imtiyaz sahələrini (platforma admini, superuser,
+        # admin panelə giriş) heç görməməlidir — nə göstərmək, nə də dəyişməyə cəhd etmək üçün.
+        if not is_admin and name in _PRIVILEGE_FIELDS:
+            continue
         d = {
             "name": name,
             "label": FIELD_LABELS.get(name) or str(f.label or name),
@@ -325,7 +502,7 @@ def build_meta(res: Resource, request=None):
         elif f.choices and f.name in ("status", "type", "payment_status", "movement_type"):
             filters_meta.append(f.name)
     return {
-        "key": res.key, "label": res.label, "group": res.group,
-        "columns": res.columns, "filters": filters_meta[:3],
+        "key": res.key, "label": res.label, "group": res.group, "section": res.section,
+        "hidden": res.hidden, "columns": res.columns, "filters": filters_meta[:3],
         "searchable": True, "fields": fields,
     }

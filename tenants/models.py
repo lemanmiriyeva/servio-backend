@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.utils import timezone
 from django.utils.text import slugify
 
 
@@ -74,7 +75,16 @@ class Shop(models.Model):
     default_warranty_days = models.PositiveIntegerField(default=14)
     currency = models.CharField(max_length=8, default="AZN")
 
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Söndürülübsə, bu mağazanın HEÇ BİR istifadəçisi giriş edə bilmir.",
+    )
+    disabled_reason = models.CharField(
+        max_length=255, blank=True,
+        help_text="Mağaza bağlıdırsa səbəb — avtomatik (ödəniş vaxtı keçib) və ya Baş Admin "
+                   "tərəfindən əl ilə yazılıb. Giriş zamanı istifadəçiyə bu mətn göstərilir.",
+    )
+    disabled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -95,6 +105,56 @@ class Shop(models.Model):
             parts = self.name.split()
             self.logo_initials = "".join(p[0] for p in parts[:2]).upper()
         super().save(*args, **kwargs)
+
+    # ------------------------------------------------------------ abunə/ödəniş
+    @property
+    def days_to_payment(self):
+        """Növbəti ödənişə qalan gün sayı (mənfi = artıq gecikib). next_payment_at yoxdursa None."""
+        if not self.next_payment_at:
+            return None
+        return (self.next_payment_at - timezone.now().date()).days
+
+    @property
+    def payment_urgency(self):
+        """Frontend-də rəng kodlaşdırması üçün: ok (yaşıl) / warning (sarı, <=7g) /
+        soon (narıncı, <=3g) / critical (qırmızı, <=1g və ya artıq keçib)."""
+        days = self.days_to_payment
+        if days is None:
+            return "ok"
+        if days <= 1:
+            return "critical"
+        if days <= 3:
+            return "soon"
+        if days <= 7:
+            return "warning"
+        return "ok"
+
+    def check_and_auto_disable(self):
+        """Ödəniş tarixi keçib və mağaza hələ aktivdirsə, avtomatik bağlayır.
+        Vəziyyət dəyişdirilibsə True qaytarır. Giriş zamanı (LoginView) çağırılır."""
+        if self.is_active and self.next_payment_at and self.next_payment_at < timezone.now().date():
+            self.is_active = False
+            self.status = self.Status.BLOCKED
+            self.disabled_reason = (
+                f"Planın ödəniş tarixi ({self.next_payment_at.strftime('%d.%m.%Y')}) keçib, "
+                f"ödəniş qeydə alınmayıb."
+            )
+            self.disabled_at = timezone.now()
+            self.save(update_fields=["is_active", "status", "disabled_reason", "disabled_at"])
+            return True
+        return False
+
+    def reactivate(self, *, months=1):
+        """Ödəniş qeydə alınanda (SubscriptionPayment yaradılanda) çağırılır: mağazanı
+        aktivləşdirir, səbəbi təmizləyir, növbəti ödəniş tarixini irəli aparır."""
+        base = self.next_payment_at if (self.next_payment_at and self.next_payment_at >= timezone.now().date()) \
+            else timezone.now().date()
+        self.next_payment_at = base + timezone.timedelta(days=30 * months)
+        self.is_active = True
+        self.status = self.Status.ACTIVE
+        self.disabled_reason = ""
+        self.disabled_at = None
+        self.save(update_fields=["next_payment_at", "is_active", "status", "disabled_reason", "disabled_at"])
 
 
 class Branch(models.Model):

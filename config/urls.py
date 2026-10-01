@@ -2,7 +2,9 @@ from django.contrib import admin
 from django.urls import path, include
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    # Django-nun daxili admin paneli — kənardan hücumların qarşısını almaq üçün
+    # standart "/admin/" əvəzinə gizli "/kapitan/" ünvanında (bot/skan cəhdləri "/admin/"-ə düşür).
+    path("kapitan/", admin.site.urls),
 
     # Auth + istifadəçilər/rollar
     path("api/", include("accounts.urls")),

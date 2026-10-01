@@ -105,7 +105,13 @@ class Command(BaseCommand):
         self.say("")
         self.say("VİDEO ÜÇÜN ƏSAS GİRİŞ (yadda saxlamaq asandır):")
         self.say("  Mağaza paneli:    demo / demo1234   (TechFix Servis, Bakı — Sahib, hər şeyə icazəli)")
-        self.say("  Platforma paneli: admin / admin1234  (Bas Admin — bütün mağazaları idarə edir)")
+        self.say("  Platforma paneli: admin / admin1234  (Bas Admin, Superuser — BÜTÜN mağazaları idarə edir)")
+        self.say("")
+        self.say("Hər mağazanın öz Platforma girişi (is_shop_admin=True — yalnız öz mağazasını görür):")
+        self.say("  elvin.techfix / parol123      — TechFix Servis (Bakı)")
+        self.say("  vuqar.mobiltemir / parol123   — MobilTəmir Gəncə")
+        self.say("  elsen.quickfix / parol123     — QuickFix Sumqayıt")
+        self.say("  aynur.repairpoint / parol123  — Repair Point Şəki")
         self.say("")
         self.say("Digər nümunə istifadəçilər (TechFix, rol/status müxtəlifliyi üçün):")
         self.say("  rustem.usta / parol123    — Usta (aktiv)")
@@ -198,7 +204,10 @@ class Command(BaseCommand):
         # Parola və rol toxunulmaz; yalnız mətn sahələri düzəlir
         user.first_name, user.last_name = owner_name
         user.email, user.phone = email, phone
-        user.save(update_fields=["first_name", "last_name", "email", "phone"])
+        # Hər mağazanın öz "Platforma" girişi olsun deyə (yalnız öz mağazasını görür/idarə edir) —
+        # Rol sistemindən (Sahib/Usta və s.) tamam ayrı, sırf bu məqsəd üçün olan müstəqil bayraq.
+        user.is_shop_admin = True
+        user.save(update_fields=["first_name", "last_name", "email", "phone", "is_shop_admin"])
         return shop, branch, user
 
     def staff_user(self, shop, branch, *, username, first, last, role, password="parol123",

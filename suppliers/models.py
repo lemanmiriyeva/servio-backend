@@ -52,3 +52,21 @@ class SupplierPurchase(models.Model):
 
     def __str__(self):
         return f"{self.supplier.name} · {self.description}"
+
+
+class SupplierPurchasePayment(models.Model):
+    """Bir ödənişin (kassadan çıxan məbləğin) konkret bu alışa neçə AZN tətbiq olunduğunun qeydi.
+    Bir təchizatçı ödənişi FIFO ilə bir neçə alışa bölünə bilər (bax: SupplierViewSet.pay) —
+    buna görə hər alışın öz tarixçəsi (hansı tarixdə nə qədər ödənilib) ayrıca saxlanır,
+    ümumi "ödəniş tarixçəsi" siyahısından fərqli olaraq, təchizatçı səhifəsində hər alışın
+    ALTINDA konkret o alışa aid ödənişlər göstərilə bilsin deyə."""
+    purchase = models.ForeignKey(SupplierPurchase, on_delete=models.CASCADE, related_name="payments")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    paid_at = models.DateTimeField(default=timezone.now)
+    method = models.CharField(max_length=20, blank=True)
+
+    class Meta:
+        ordering = ["-paid_at"]
+
+    def __str__(self):
+        return f"{self.purchase} · {self.amount}"

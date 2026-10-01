@@ -188,6 +188,17 @@ class RepairPaymentCreateSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=10, decimal_places=2)
     method = serializers.ChoiceField(choices=RepairPayment._meta.get_field("method").choices)
 
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Məbləğ sıfırdan böyük olmalıdır.")
+        repair: RepairOrder = self.context["repair"]
+        remaining = repair.remaining_debt
+        if remaining > 0 and value > remaining:
+            raise serializers.ValidationError(
+                f"Ödəniş qalıq borcdan ({remaining} AZN) çox ola bilməz."
+            )
+        return value
+
     def save(self, **kwargs):
         repair: RepairOrder = self.context["repair"]
         request = self.context["request"]

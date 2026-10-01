@@ -13,6 +13,7 @@ from customers.models import Customer
 from repairs.models import RepairOrder, RepairStatus, PaymentStatus
 from finance.models import CashTransaction, TransactionType
 from suppliers.models import Supplier
+from marketplace.models import MarketplaceOrder, OrderStatus
 
 
 class DashboardView(APIView):
@@ -131,6 +132,22 @@ class ReportsSummaryView(APIView):
             for s in Supplier.objects.filter(shop=shop)
         ]
 
+        # Marketplace (digər mağazalara satış) — əvvəllər bu hesabata heç düşmürdü,
+        # "qazanc"/"profit" yalnız öz müştərilərimizə olan təmirlərdən hesablanırdı.
+        # Marketplace satışı bu mağaza üçün də real gəlir/qazanc yaradır, ona görə
+        # ayrıca sətirlər kimi əlavə edirik (mövcud total_sales/total_cost/total_profit-i
+        # DƏYİŞMİRİK ki, başqa yerdə bu sahələrə etibar edən kod pozulmasın).
+        mp_sales = MarketplaceOrder.objects.filter(
+            seller_shop=shop, status__in=[OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.COMPLETED],
+            paid_at__date__gte=start, paid_at__date__lte=end,
+        )
+        marketplace_sales_total = Decimal("0")
+        marketplace_cost_total = Decimal("0")
+        for o in mp_sales.select_related("product"):
+            marketplace_sales_total += o.total_price
+            marketplace_cost_total += (o.product.unit_cost or Decimal("0")) * o.quantity
+        marketplace_profit = marketplace_sales_total - marketplace_cost_total
+
         return Response({
             "period": {"start": start, "end": end},
             "total_sales": total_sales,
@@ -138,7 +155,10 @@ class ReportsSummaryView(APIView):
             "total_profit": total_sales - total_cost,
             "total_expense": expenses,
             "total_refund": refunds,
-            "net_profit": (total_sales - total_cost) - expenses - refunds,
+            "marketplace_sales_total": marketplace_sales_total,
+            "marketplace_cost_total": marketplace_cost_total,
+            "marketplace_profit": marketplace_profit,
+            "net_profit": (total_sales - total_cost) - expenses - refunds + marketplace_profit,
             "customer_debt_total": customer_debt,
             "supplier_debt_total": supplier_debt,
             "repair_count": repairs.count(),

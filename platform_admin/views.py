@@ -3,13 +3,14 @@ from django.db.models import Sum
 from rest_framework import viewsets
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 
 from accounts.mixins import IsPlatformAdmin
 from tenants.models import Shop
 from .models import SupportTicket, SubscriptionPayment
 from .serializers import SupportTicketSerializer, SubscriptionPaymentSerializer
-from .resources import RESOURCES, build_meta
+from .resources import RESOURCES, build_meta, _is_shop_admin
 
 
 class SupportTicketViewSet(viewsets.ModelViewSet):
@@ -46,8 +47,18 @@ class PlatformDashboardView(APIView):
 
 
 class PlatformResourcesView(APIView):
-    """GET /api/platform/resources/ — platforma panelindəki bütün bölmələr və onların sahə təsviri."""
-    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+    """
+    GET /api/platform/resources/ — platforma panelindəki bölmələrin təsviri.
+    Platform Super Admin: HAMISI. Mağaza sahibi (owner rolu): yalnız `shop_scoped=True`
+    olanlar (öz mağazasının "Ətraflı" səhifəsindəki tab-lar) — imtiyazlı sahələr `build_meta`
+    daxilində artıq gizlədilir.
+    """
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response([build_meta(r, request) for r in RESOURCES])
+        user = request.user
+        if user.is_platform_admin or user.is_superuser:
+            return Response([build_meta(r, request) for r in RESOURCES])
+        if not _is_shop_admin(user):
+            raise PermissionDenied("Bu bölməyə giriş icazəniz yoxdur.")
+        return Response([build_meta(r, request) for r in RESOURCES if r.shop_scoped])

@@ -1,12 +1,12 @@
 from decimal import Decimal
 from django.db import models
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from accounts.mixins import ShopScopedQuerysetMixin, HasModulePermission
 from accounts.models import Module
-from .models import Supplier
+from .models import Supplier, SupplierPurchasePayment
 from .serializers import SupplierSerializer
 
 
@@ -15,6 +15,9 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
     serializer_class = SupplierSerializer
     permission_classes = [IsAuthenticated, HasModulePermission]
     module_code = Module.SUPPLIERS
+    # Ad/telefon üzrə axtarış — ?search=... (əvvəllər heç bir axtarış yox idi).
+    filter_backends = [filters.SearchFilter]
+    search_fields = ["name", "phone"]
 
     @action(detail=True, methods=["post"], url_path="pay")
     def pay(self, request, pk=None):
@@ -30,6 +33,7 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         if amount <= 0:
             return Response({"detail": "Məbləğ sıfırdan böyük olmalıdır."}, status=status.HTTP_400_BAD_REQUEST)
 
+        method = request.data.get("method", "cash")
         remaining_to_apply = amount
         for purchase in supplier.purchases.filter(paid_amount__lt=models.F("amount")).order_by("purchased_at"):
             if remaining_to_apply <= 0:
@@ -38,13 +42,16 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
             applied = min(owed, remaining_to_apply)
             purchase.paid_amount += applied
             purchase.save(update_fields=["paid_amount"])
+            # Bu alışın öz "hansı tarixdə nə qədər ödənilib" tarixçəsi üçün — bir ödəniş
+            # bir neçə alışa bölünə bilər (FIFO), ona görə hər paya ayrı qeyd yaradılır.
+            SupplierPurchasePayment.objects.create(purchase=purchase, amount=applied, method=method)
             remaining_to_apply -= applied
 
         from finance.models import CashTransaction, TransactionType
         CashTransaction.objects.create(
             shop=supplier.shop, type=TransactionType.SUPPLIER_PAYMENT,
             amount=amount - remaining_to_apply if remaining_to_apply > 0 else amount,
-            method=request.data.get("method", "cash"),
+            method=method,
             description=f"{supplier.name} — borc ödənişi",
             supplier=supplier, created_by=request.user,
         )
@@ -64,6 +71,8 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
             return Response({"detail": "Bu təmir sizin mağazaya aid deyil."}, status=status.HTTP_400_BAD_REQUEST)
         if s.validated_data.get("paid_amount", 0) > s.validated_data["amount"]:
             return Response({"detail": "Ödənilən məbləğ alış məbləğindən çox ola bilməz."}, status=status.HTTP_400_BAD_REQUEST)
-        s.save(shop=supplier.shop, supplier=supplier)
+        purchase = s.save(shop=supplier.shop, supplier=supplier)
+        if purchase.paid_amount:
+            SupplierPurchasePayment.objects.create(purchase=purchase, amount=purchase.paid_amount, method="cash")
         fresh = self.get_queryset().get(pk=supplier.pk)
         return Response(SupplierSerializer(fresh).data, status=status.HTTP_201_CREATED)

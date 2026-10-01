@@ -203,5 +203,20 @@ if not DEBUG:
     # göndərdiyi başlığa etibar edərək HTTPS-i düzgün aşkarlamaq üçün:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# --- E-poçt (zəmanət sənədini müştəriyə göndərmək üçün) ---
+# .env-də EMAIL_HOST verilməyibsə, DEBUG-da mesajlar konsola yazılır (real göndərmə
+# olmur), production-da isə .env-də SMTP məlumatları mütləq doldurulmalıdır
+# (məs. info@domeniniz.az — Gmail/Yandex/öz SMTP server-iniz).
+if env("EMAIL_HOST", default=""):
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = env("EMAIL_HOST")
+    EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+    EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+    EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+    EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="info@servio.local")
+
 # --- Jazzmin (admin panel dizaynı) ---
 from .jazzmin_conf import JAZZMIN_SETTINGS, JAZZMIN_UI_TWEAKS  # noqa: E402,F401

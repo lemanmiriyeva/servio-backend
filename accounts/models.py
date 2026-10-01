@@ -70,7 +70,16 @@ class User(AbstractUser):
     branch = models.ForeignKey(Branch, on_delete=models.SET_NULL, null=True, blank=True, related_name="users")
     role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name="users")
     phone = models.CharField(max_length=32, blank=True)
-    is_platform_admin = models.BooleanField(default=False)
+    is_platform_admin = models.BooleanField(
+        default=False,
+        help_text="DİQQƏT: bu BÜTÜN mağazaları görən Platforma Super Adminidir. Yalnız BİR mağazanın "
+                   "admini olsun deyə bunu YOX, aşağıdakı \"Mağaza admini\" sahəsini işarələyin.",
+    )
+    is_shop_admin = models.BooleanField(
+        default=False,
+        help_text="Bu istifadəçi öz mağazasının Platforma panelinə daxil ola bilsin (yalnız öz "
+                   "mağazasının məlumatlarını görür/redaktə edir). Rol sistemindən tamam ayrıdır.",
+    )
 
     class Status(models.TextChoices):
         ACTIVE = "active", "Aktiv"

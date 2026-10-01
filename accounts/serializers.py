@@ -64,8 +64,8 @@ class MeSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             "id", "username", "first_name", "last_name", "email", "phone",
-            "shop", "branch", "role", "initials", "is_platform_admin", "is_superadmin", "status",
-            "allowed_modules",
+            "shop", "branch", "role", "initials", "is_platform_admin", "is_shop_admin", "is_superadmin",
+            "status", "allowed_modules",
         ]
 
     def get_is_superadmin(self, obj):
@@ -142,5 +142,17 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         data = super().validate(attrs)
+        user = self.user
+        # Platform Super Admin/superuser mağaza statusundan asılı deyil — qalanları üçün
+        # mağaza bağlıdırsa (planın vaxtı keçib, ödəniş edilməyib və ya Baş Admin söndürüb)
+        # token verilmir, aydın səbəb mesajı qaytarılır.
+        if user.shop_id and not (user.is_platform_admin or user.is_superuser):
+            shop = user.shop
+            shop.check_and_auto_disable()
+            if not shop.is_active:
+                raise serializers.ValidationError(
+                    shop.disabled_reason
+                    or "Mağazanın planının vaxtı bitib. Ödəniş etdikdən sonra giriş aktivləşəcək."
+                )
         data["user"] = MeSerializer(self.user).data
         return data

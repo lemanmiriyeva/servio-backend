@@ -1,0 +1,190 @@
+<!-- Zəmanət sənədi — müştəriyə PDF kimi göndərilir/çap edilir.
+     xhtml2pdf (pisa) məhdud CSS2 dəstəkləyir: flex/grid YOXDUR, ona görə
+     bütün yan-yana düzülüşlər <table> ilə edilir. Dizayn uğurun göndərdiyi
+     "zemanet.html" nümunəsinə əsaslanır. -->
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  {% if font_regular %}
+  @font-face {
+    font-family: "DejaVu Sans";
+    src: url("{{ font_regular }}");
+  }
+  {% endif %}
+  {% if font_bold %}
+  @font-face {
+    font-family: "DejaVu Sans";
+    font-weight: bold;
+    src: url("{{ font_bold }}");
+  }
+  {% endif %}
+  @page {
+    size: A5 portrait;
+    margin: 9mm 10mm;
+  }
+  /* Azərbaycan hərfləri (ə, ş, ğ, ı və s.) üçün DejaVu Sans — Helvetica bunları çəkə bilmir. */
+  * { font-family: "DejaVu Sans", Helvetica, Arial, sans-serif; }
+  body { font-size: 11px; color: #041326; }
+
+  table { width: 100%; border-collapse: collapse; }
+  td { vertical-align: top; }
+
+  /* HEADER */
+  .service-name { font-size: 20px; font-weight: bold; color: #041326; }
+  .doc-type { font-size: 9px; color: #7c8799; margin-top: 2px; }
+  .order { font-size: 12px; font-weight: bold; text-align: right; color: #041326; }
+  .date { font-size: 9px; color: #7c8799; text-align: right; margin-top: 2px; }
+  .header-rule { border-bottom: 1px solid #e5eaf1; font-size: 1px; line-height: 1px; padding-top: 10px; margin-bottom: 10px; }
+
+  /* CUSTOMER CARD */
+  .customer-card { background-color: #041326; border-radius: 10px; margin-top: 2px; margin-bottom: 11px; }
+  .customer-card td { padding: 6px 13px; }
+  .customer-label { font-size: 8px; font-weight: bold; color: #9bb2c8; text-transform: uppercase; }
+  .status { background-color: #1d3a63; color: #9bc4ff; border-radius: 10px; padding: 4px 8px; font-size: 8px; font-weight: bold; text-align: right; }
+  .customer-name { font-size: 16px; font-weight: bold; color: #ffffff; padding-top: 2px; }
+  .customer-phone { font-size: 10px; color: #c7d3e0; text-align: right; padding-top: 2px; }
+
+  /* DEVICE */
+  .section-title { font-size: 9px; font-weight: bold; color: #7c8799; text-transform: uppercase; margin-bottom: 6px; }
+  .device-name { font-size: 15px; font-weight: bold; color: #041326; }
+  .serial { font-size: 9px; color: #7c8799; text-align: right; }
+  .serial strong { color: #041326; }
+
+  .details { margin-top: 8px; margin-bottom: 11px; }
+  .details td { border-top: 1px solid #e5eaf1; padding: 7px 1px; font-size: 10px; }
+  .details tr:first-child td { border-top: none; }
+  .detail-label { color: #7c8799; font-weight: 600; }
+  .detail-value { color: #041326; font-weight: bold; text-align: right; }
+  .price { font-size: 13px; color: #116cfb; }
+
+  /* WARRANTY */
+  .warranty-card { background-color: #116cfb; border-radius: 10px; margin-bottom: 9px; }
+  .warranty-card td { padding: 8px 13px 0 13px; }
+  .warranty-label { font-size: 8px; font-weight: bold; color: #cfe2ff; text-transform: uppercase; }
+  .warranty-days { font-size: 18px; font-weight: bold; color: #ffffff; padding-top: 2px; }
+  .warranty-dates { font-size: 9px; color: #e3edff; text-align: right; line-height: 1.6; }
+  .warranty-dates strong { color: #ffffff; }
+  .delivery-note { font-size: 9px; color: #e3edff; line-height: 1.4; padding: 9px 13px 10px 13px; margin-top: 2px; border-top: 1px solid #3f84f5; }
+  .delivery-note strong { color: #ffffff; }
+
+  /* TERMS */
+  .terms { background-color: #f6f8fb; border-radius: 9px; padding: 10px 12px; }
+  .terms-title { font-size: 11px; font-weight: bold; margin-bottom: 5px; color: #041326; }
+  .terms-text { font-size: 9px; line-height: 1.45; color: #344054; white-space: pre-line; margin-bottom: 7px; }
+
+  /* FOOTER */
+  .footer-rule { border-top: 1px solid #e5eaf1; font-size: 1px; line-height: 1px; margin-top: 10px; padding-top: 9px; }
+  .contact { font-size: 8px; color: #7c8799; line-height: 1.5; }
+  .contact strong { font-size: 9px; color: #041326; }
+  .powered { font-size: 7px; color: #9aa3b1; text-align: right; }
+  .servio { font-size: 12px; font-weight: bold; color: #041326; text-align: right; }
+  .servio span { color: #116cfb; }
+
+  .sign { margin-top: 18px; }
+  .sign-line { display: inline-block; width: 45%; border-top: 1px solid #333; margin-right: 5%; padding-top: 4px; font-size: 9px; color: #555; }
+</style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <table>
+    <tr>
+      <td style="width:55%;">
+        <div class="service-name">{{ shop.name }}</div>
+        <div class="doc-type">Təhvil-təslim və zəmanət sənədi</div>
+      </td>
+      <td style="width:45%;">
+        <div class="order">{{ repair.number }}</div>
+        <div class="date">{{ repair.delivered_at|date:"d.m.Y"|default:"—" }}{% if repair.delivered_at %} • {{ repair.delivered_at|date:"H:i" }}{% endif %}</div>
+      </td>
+    </tr>
+  </table>
+  <div class="header-rule"></div>
+
+  <!-- CUSTOMER -->
+  <table class="customer-card">
+    <tr>
+      <td style="width:70%;"><span class="customer-label">MÜŞTƏRİ</span></td>
+      <td style="width:30%;"><div class="status">{% if repair.status == "delivered" %}&#10003; TƏHVİL VERİLDİ{% else %}{{ repair.get_status_display|upper }}{% endif %}</div></td>
+    </tr>
+    <tr>
+      <td><div class="customer-name">{{ repair.customer.full_name }}</div></td>
+      <td><div class="customer-phone">{{ repair.customer.phone }}</div></td>
+    </tr>
+  </table>
+
+  <!-- DEVICE -->
+  <div class="section-title">Cihaz və xidmət</div>
+  <table>
+    <tr>
+      <td style="width:60%;"><div class="device-name">{{ repair.device_brand }} {{ repair.device_model }}</div></td>
+      <td style="width:40%;"><div class="serial">IMEI / Seriya<br/><strong>{{ repair.device_imei|default:repair.device_serial|default:"—" }}</strong></div></td>
+    </tr>
+  </table>
+
+  <table class="details">
+    <tr>
+      <td class="detail-label" style="width:35%;">Görülən iş</td>
+      <td class="detail-value" style="width:65%;">{{ repair.work_done_note|default:repair.issue_description }}</td>
+    </tr>
+    <tr>
+      <td class="detail-label">Xidmət məbləği</td>
+      <td class="detail-value price">{{ repair.sale_price }} {{ shop.currency }}</td>
+    </tr>
+  </table>
+
+  <!-- WARRANTY -->
+  <table class="warranty-card">
+    <tr>
+      <td style="width:50%;">
+        <div class="warranty-label">ZƏMANƏT MÜDDƏTİ</div>
+        <div class="warranty-days">{{ repair.warranty_days }} GÜN</div>
+      </td>
+      <td style="width:50%;">
+        <div class="warranty-dates">
+          Başlanğıc: <strong>{{ repair.warranty_started_at|date:"d.m.Y"|default:"—" }}</strong><br/>
+          Son tarix: <strong>{{ repair.warranty_end_date|date:"d.m.Y"|default:"—" }}</strong>
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2" class="delivery-note">
+        Zəmanət halı diaqnostika nəticəsində təsdiqləndikdən sonra cihaz <strong>3 iş günü ərzində təhvil verilir.</strong>
+      </td>
+    </tr>
+  </table>
+
+  <!-- TERMS -->
+  {% if shop.receipt_terms %}
+  <div class="terms">
+    <div class="terms-title">Zəmanət şərtləri</div>
+    <div class="terms-text">{{ shop.receipt_terms }}</div>
+  </div>
+  {% endif %}
+
+  <div class="sign">
+    <span class="sign-line">Usta imzası</span>
+    <span class="sign-line">Müştəri imzası</span>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer-rule"></div>
+  <table>
+    <tr>
+      <td style="width:60%;">
+        <div class="contact">
+          <strong>{{ shop.name }}</strong><br/>
+          {{ shop.phone }}<br/>
+          {{ shop.address }}
+        </div>
+      </td>
+      <td style="width:40%;">
+        <div class="powered">Sənəd Servio ilə yaradılıb</div>
+        <div class="servio">Servio<span>.az</span></div>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>

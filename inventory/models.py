@@ -34,6 +34,10 @@ class Product(models.Model):
         default=False,
         help_text="Zəmanət altında qaytarılıb, təchizatçı qəbul etməyib — satışa çıxarılmır (Zay anbarı)",
     )
+    is_used = models.BooleanField(
+        default=False,
+        help_text="İkinci əl (istifadə olunmuş) məhsuldur — yeni deyil",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
