@@ -1,5 +1,17 @@
 from rest_framework import serializers
+from platform_admin.models import SupportTicket
 from .models import Shop, Branch, Plan
+
+
+class SupportTicketSerializer(serializers.ModelSerializer):
+    """Mağazanın özü dəstəyə müraciət göndərmək üçün istifadə edir (yalnız öz mağazasının
+    müraciətlərini görür) — status yalnız Baş Admin tərəfindən (/kapitan-dan) dəyişdirilir."""
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = SupportTicket
+        fields = ["id", "subject", "message", "status", "status_display", "created_at"]
+        read_only_fields = ["id", "status", "status_display", "created_at"]
 
 
 class PlanSerializer(serializers.ModelSerializer):

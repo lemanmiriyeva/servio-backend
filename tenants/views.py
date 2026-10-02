@@ -1,12 +1,15 @@
-from rest_framework import viewsets, filters
+from rest_framework import mixins, viewsets, filters
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
 from accounts.mixins import IsPlatformAdmin, ShopOwnQuerysetMixin
+from platform_admin.models import SupportTicket
 from .models import Shop, Branch, Plan
-from .serializers import ShopSerializer, BranchSerializer, PlanSerializer, ShopSettingsSerializer
+from .serializers import (
+    ShopSerializer, BranchSerializer, PlanSerializer, ShopSettingsSerializer, SupportTicketSerializer,
+)
 
 
 class ShopViewSet(viewsets.ModelViewSet):
@@ -50,6 +53,19 @@ class BranchViewSet(viewsets.ModelViewSet):
         if user.is_platform_admin or user.is_superuser:
             return Branch.objects.all()
         return Branch.objects.filter(shop_id=user.shop_id)
+
+    def perform_create(self, serializer):
+        serializer.save(shop=self.request.user.shop)
+
+
+class SupportTicketViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
+    """Mağaza öz dəstək müraciətlərini göndərir və keçmiş müraciətlərinin statusuna baxır.
+    Yalnız ÖZ mağazasının müraciətlərini görür; status dəyişikliyi yalnız /kapitan-dan edilir."""
+    serializer_class = SupportTicketSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return SupportTicket.objects.filter(shop_id=self.request.user.shop_id).order_by("-created_at")
 
     def perform_create(self, serializer):
         serializer.save(shop=self.request.user.shop)
