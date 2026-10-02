@@ -123,6 +123,13 @@ RESOURCES = [
              ["username", "first_name", "last_name", "shop", "role", "status",
               "is_shop_admin", "is_platform_admin"],
              exclude=("groups", "user_permissions"),  # password: write-only, hash-lənir
+             # Bu 3 tarix sistemin özü tərəfindən idarə olunur (son giriş, qoşulma, son görünmə) —
+             # istifadəçi yaradanda/redaktə edəndə əl ilə dəyişilməməli, formda göstərilməməlidir.
+             extra_kwargs={
+                 "last_login": {"read_only": True},
+                 "date_joined": {"read_only": True},
+                 "last_seen_at": {"read_only": True},
+             },
              section=SEC_PLATFORM, shop_scoped=True),
     Resource("roles", "accounts.Role", "Rollar", PLATFORM,
              ["name", "shop", "is_owner_role"], section=SEC_PLATFORM, shop_scoped=True),
@@ -222,9 +229,9 @@ FIELD_LABELS = {
     "default_warranty_days": "Standart zəmanət (gün)", "currency": "Valyuta", "is_active": "Aktivdir",
     "price_monthly": "Aylıq qiymət", "max_branches": "Maks. filial", "max_users": "Maks. istifadəçi",
     "is_main": "Əsas filial", "is_owner_role": "Sahib rolu", "module": "Modul", "is_allowed": "İcazə verilib",
-    "username": "Login", "first_name": "Ad", "last_name": "Soyad", "password": "Şifrə",
+    "username": "İstifadəçi adı (giriş üçün)", "first_name": "Ad", "last_name": "Soyad", "password": "Şifrə",
     "is_platform_admin": "Platforma Super Admini (BÜTÜN mağazaları görür!)",
-    "is_superuser": "Superuser (texniki, Platforma Super Admini ilə eyni təsirə malikdir)",
+    "is_superuser": "Superistifadəçi (texniki bayraq, Platforma Super Admini ilə eyni təsirə malikdir)",
     "is_staff": "Admin panelə giriş",
     "is_shop_admin": "Mağaza admini (Platforma panelinə — yalnız öz mağazası üçün giriş)",
     "last_login": "Son giriş", "date_joined": "Qoşulub", "last_seen_at": "Son görünmə",
