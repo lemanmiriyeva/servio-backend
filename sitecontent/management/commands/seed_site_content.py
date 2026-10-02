@@ -1,11 +1,11 @@
 """
-�ctimai sayt (Ana s?hif? / Funksiyalar / Qiym?tl?r / Haqq�m�zda / FAQ / ?laq?) ���n ba�lan��c
-m?zmunu bazaya yaz�r. Bunsuz bu s?hif?l?r frontend-in �z "FALLBACK" (ehtiyat) m?tni il?
-g�r�n�r (kod i�ind? sabit), baza is? bo� qal�r � Ba� Admin /kapitan-dan redakt? etm?k
-ist?y?nd? d?yi�iklik he� bir yer? yaz�lm�r. Bu ?mr frontend-d?ki haz�rk� m?tni EYN� �L?
-bazaya k���r�r ki, sayt�n g�r�n��� d?yi�m?sin, amma art�q h?qiq?t?n bazadan idar? olunsun.
+İctimai sayt (Ana səhifə / Funksiyalar / Qiymətlər / Haqqımızda / FAQ / Əlaqə) üçün başlanğıc
+məzmunu bazaya yazır. Bunsuz bu səhifələr frontend-in öz "FALLBACK" (ehtiyat) mətni ilə
+görünür (kod içində sabit), baza isə boş qalır — Baş Admin /kapitan-dan redaktə etmək
+istəyəndə dəyişiklik heç bir yerə yazılmır. Bu əmr frontend-dəki hazırkı mətni EYNİ İLƏ
+bazaya köçürür ki, saytın görünüşü dəyişməsin, amma artıq həqiqətən bazadan idarə olunsun.
 
-�dempotentdir � t?krar i�l?dils?, m�vcud qeydl?ri yaln�z yenil?yir (yeni sur?t yaratm�r).
+İdempotentdir — təkrar işlədilsə, mövcud qeydləri yalnız yeniləyir (yeni surət yaratmır).
 """
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -16,7 +16,7 @@ from tenants.models import Plan
 
 
 class Command(BaseCommand):
-    help = "�ctimai sayt�n (Ana s?hif?, Funksiyalar, Qiym?tl?r, Haqq�m�zda, FAQ, ?laq?) ba�lan��c m?zmununu bazaya yaz�r."
+    help = "İctimai saytın (Ana səhifə, Funksiyalar, Qiymətlər, Haqqımızda, FAQ, Əlaqə) başlanğıc məzmununu bazaya yazır."
 
     def say(self, msg, style=None):
         try:
@@ -34,90 +34,90 @@ class Command(BaseCommand):
         self.seed_plans()
         invalidate_site_content_cache()
         self.say("")
-        self.say("Sayt m?zmunu bazaya yaz�ld� � /kapitan panelind?n art�q redakt? edil? bil?r.", self.style.SUCCESS)
+        self.say("Sayt məzmunu bazaya yazıldı — /kapitan panelindən artıq redaktə edilə bilər.", self.style.SUCCESS)
 
-    # ------------------------------------------------------------ Sayt ayarlar� (t?k s?tir)
+    # ------------------------------------------------------------ Sayt ayarları (tək sətir)
     def seed_settings(self):
         s = SiteSettings.load()
         s.brand_name = "SERVIO"
         s.tagline = ""
-        s.hero_title = "Servisinizi daha rahat idar? edin."
+        s.hero_title = "Servisinizi daha rahat idarə edin."
         s.hero_subtitle = (
-            "M��t?ril?r, t?mirl?r, g?lir-x?rc, anbar, borclar v? hesabatlar � ham�s� bir "
-            "platformada. Telefon v? komp�ter servis biznesl?r ���n a��ll� idar?etm? sistemi."
+            "Müştərilər, təmirlər, gəlir-xərc, anbar, borclar və hesabatlar — hamısı bir "
+            "platformada. Telefon və kompüter servis bizneslər üçün ağıllı idarəetmə sistemi."
         )
         s.email = "info@servio.az"
         s.phone = "+994 50 000 00 00"
         s.whatsapp = "994500000000"
-        s.address = "Bak�, Az?rbaycan"
-        s.hours = "Bazar ert?si � �?nb?, 09:00 � 18:00"
+        s.address = "Bakı, Azərbaycan"
+        s.hours = "Bazar ertəsi – Şənbə, 09:00 – 18:00"
         s.footer_note = ""
         s.save()
-        self.say("Sayt ayarlar� yaz�ld� (brend, hero m?tni, ?laq? m?lumatlar�).")
+        self.say("Sayt ayarları yazıldı (brend, hero mətni, əlaqə məlumatları).")
 
     # ------------------------------------------------------------------------------- FAQ
     def seed_faq(self):
         items = [
-            ("Servio kiml?r ���nd�r?",
-             "Telefon v? komp�ter t?miri il? m?��ul olan ustalar v? servis m?rk?zl?ri ���n. "
-             "M��t?ri, t?mir, kassa, anbar, borc v? hesabatlar�n ham�s� bir yerd?dir."),
-            ("Telefonda i�l?yirmi?",
-             "B?li. Sistem h?m komp�ter, h?m d? telefon ekran�nda rahat i�l?yir, ona g�r? d? "
-             "ustalar i�in ortas�nda da m?lumat daxil ed? bil?r."),
-            ("M?nim m?lumat�m� ba�qa servis g�r? bil?rmi?",
-             "Xeyr. H?r servis ayr�ca hesab kimi i�l?yir v? yaln�z �z m��t?ril?rini, g?lirini, "
-             "x?rcl?rini, borclar�n� v? t?mir m?lumatlar�n� g�r�r."),
-            ("T?l?b?y? giri� vers?m, qazanc� g�r?c?kmi?",
-             "Yox. Rol v? icaz?l?r b�lm?sind?n �?yird ���n g?lir v? net qazanc r?q?ml?rini "
-             "ba�laya bil?rsiniz. O, t?mirl?rl? i�l?y? bil?r, amma maya, qazanc v? g?lir ona "
-             "g�r�nm�r."),
-            ("Bir ne�? filialla i�l?m?k m�mk�nd�rm�?",
-             "B?li. Basic planda 1, Pro planda 5 filial d?st?kl?nir. H?r plan �zr? filial v? "
-             "istifad?�i limiti Qiym?tl?r s?hif?sind? g�st?rilib."),
-            ("T?chizat��ya borcu nec? izl?yir?m?",
-             "T?miri qeyd ed?nd? detal� t?chizat��dan borcla ald���n�z� se�irsiniz, m?bl?� "
-             "t?chizat��n�n hesab�na borc kimi yaz�l�r. �d?y?nd?n sonra �d?nilmi� kimi "
-             "i�ar?l?yirsiniz. Detal istifad? olunmay�bsa (m?s?l?n, plata t?miri), bu sah?ni "
-             "doldurmaq m?cburi deyil."),
-            ("Z?man?t nec? hesablan�r?",
-             "Cihaz t?hvil veril?nd? z?man?t m�dd?ti avtomatik ba�lay�r v? g�n-g�n geri say�l�r. "
-             "M�dd?ti bit?n z?man?t �m�dd?ti bitib� kimi g�st?rilir."),
-            ("Pulsuz ba�laya bil?r?mmi?",
-             "B?li, pulsuz s�naqla ba�laya bil?rsiniz. M�dd?t v? �?rtl?r bar?d? ?laq? "
-             "s?hif?sind?n biz? yaz�n."),
+            ("Servio kimlər üçündür?",
+             "Telefon və kompüter təmiri ilə məşğul olan ustalar və servis mərkəzləri üçün. "
+             "Müştəri, təmir, kassa, anbar, borc və hesabatların hamısı bir yerdədir."),
+            ("Telefonda işləyirmi?",
+             "Bəli. Sistem həm kompüter, həm də telefon ekranında rahat işləyir, ona görə də "
+             "ustalar işin ortasında da məlumat daxil edə bilər."),
+            ("Mənim məlumatımı başqa servis görə bilərmi?",
+             "Xeyr. Hər servis ayrıca hesab kimi işləyir və yalnız öz müştərilərini, gəlirini, "
+             "xərclərini, borclarını və təmir məlumatlarını görür."),
+            ("Tələbəyə giriş versəm, qazancı görəcəkmi?",
+             "Yox. Rol və icazələr bölməsindən şəyird üçün gəlir və net qazanc rəqəmlərini "
+             "bağlaya bilərsiniz. O, təmirlərlə işləyə bilər, amma maya, qazanc və gəlir ona "
+             "görünmür."),
+            ("Bir neçə filialla işləmək mümkündürmü?",
+             "Bəli. Basic planda 1, Pro planda 5 filial dəstəklənir. Hər plan üzrə filial və "
+             "istifadəçi limiti Qiymətlər səhifəsində göstərilib."),
+            ("Təchizatçıya borcu necə izləyirəm?",
+             "Təmiri qeyd edəndə detalı təchizatçıdan borcla aldığınızı seçirsiniz, məbləğ "
+             "təchizatçının hesabına borc kimi yazılır. Ödəyəndən sonra ödənilmiş kimi "
+             "işarələyirsiniz. Detal istifadə olunmayıbsa (məsələn, plata təmiri), bu sahəni "
+             "doldurmaq məcburi deyil."),
+            ("Zəmanət necə hesablanır?",
+             "Cihaz təhvil veriləndə zəmanət müddəti avtomatik başlayır və gün-gün geri sayılır. "
+             "Müddəti bitən zəmanət “müddəti bitib” kimi göstərilir."),
+            ("Pulsuz başlaya bilərəmmi?",
+             "Bəli, pulsuz sınaqla başlaya bilərsiniz. Müddət və şərtlər barədə Əlaqə "
+             "səhifəsindən bizə yazın."),
         ]
         for i, (q, a) in enumerate(items):
             FaqItem.objects.update_or_create(question=q, defaults={"answer": a, "order": i, "is_active": True})
-        self.say(f"FAQ: {len(items)} sual-cavab yaz�ld�.")
+        self.say(f"FAQ: {len(items)} sual-cavab yazıldı.")
 
     # -------------------------------------------------------------------------- Funksiyalar
     def seed_features(self):
         items = [
-            ("Users", "primary", "M��t?ril?r", "M��t?ri bazas�n� yarad�n v? asanl�qla idar? edin.",
-             ["Ad, telefon v? qeydl?r �zr? s�r?tli axtar��", "H?r m��t?rinin b�t�n t?mir tarix�?si",
-              "�d?ni�l?r, borclar v? z?man?tl?r bir profild?"]),
-            ("Wrench", "dark", "T?mir / Xidm?tl?r", "T?mir prosesini izl?yin, statuslar� qeyd edin.",
-             ["H?r xidm?t? avtomatik n�mr? (SRV-2026-000125)",
-              "Q?bul edildi � Diaqnostika � Haz�rd�r � T?hvil verildi",
-              "Qazanc sat�� v? maya d?y?rind?n avtomatik hesablan�r"]),
-            ("Boxes", "primary", "Anbar", "Ehtiyat hiss?l?ri v? mallar�n idar? edilm?si.",
-             ["Al�� v? sat�� qiym?ti, say v? minimum h?dd", "Stok azald�qda x?b?rdarl�q",
-              "Detal istifad? olunanda say avtomatik azal�r"]),
-            ("Truck", "dark", "T?chizat��lar", "T?chizat��lar� ?lav? edin, borclar� izl?yin.",
-             ["Al�� tarix�?si v? �mumi m?bl?�", "Ay sonu hesabla�ma ���n borc qeydi",
-              "T?mird?n avtomatik t?chizat�� borcu yaratmaq"]),
-            ("Wallet", "primary", "Kassa", "G?lir v? x?rcl?ri idar? edin, kassa balans�n� g�r�n.",
-             ["Xidm?t �d?ni�l?ri v? dig?r g?lirl?r",
-              "X?rcl?r v? t?chizat�� �d?ni�l?ri balansdan ��x�l�r", "B�t�n ?m?liyyatlar�n tarix�?si"]),
-            ("BarChart3", "dark", "Hesabatlar", "G�nd?lik, ayl�q, illik analizl?r v? qrafikl?r.",
-             ["�st?nil?n tarix aral��� �zr? hesabat", "Xidm?t v? t?chizat�� �zr? analiz",
-              "�mumi sat��, maya, x?rc v? xalis qazanc"]),
-            ("ShieldCheck", "primary", "Z?man?tl?r", "Z?man?t m�dd?tl?rini izl?yin, m��t?ril?r? x?b?rdarl�q edin.",
-             ["T?hvild?n sonra z?man?t avtomatik geri say�l�r", "Bitm?y? 3 g�n qalanlar ayr�ca g�r�n�r",
-              "7 / 14 / 30 / 90 g�n v? ya z?man?tsiz"]),
-            ("Printer", "dark", "Q?bz / �ap", "R?smi q?bz v? t?hvil-t?slim s?n?dl?rini �ap edin.",
-             ["A4 format�nda s?liq?li t?hvil-t?slim akt�", "Servisin �z z?man?t �?rtl?ri m?tni",
-              "M��t?ri v? usta imza sah?l?ri"]),
+            ("Users", "primary", "Müştərilər", "Müştəri bazasını yaradın və asanlıqla idarə edin.",
+             ["Ad, telefon və qeydlər üzrə sürətli axtarış", "Hər müştərinin bütün təmir tarixçəsi",
+              "Ödənişlər, borclar və zəmanətlər bir profildə"]),
+            ("Wrench", "dark", "Təmir / Xidmətlər", "Təmir prosesini izləyin, statusları qeyd edin.",
+             ["Hər xidmətə avtomatik nömrə (SRV-2026-000125)",
+              "Qəbul edildi → Diaqnostika → Hazırdır → Təhvil verildi",
+              "Qazanc satış və maya dəyərindən avtomatik hesablanır"]),
+            ("Boxes", "primary", "Anbar", "Ehtiyat hissələri və malların idarə edilməsi.",
+             ["Alış və satış qiyməti, say və minimum hədd", "Stok azaldıqda xəbərdarlıq",
+              "Detal istifadə olunanda say avtomatik azalır"]),
+            ("Truck", "dark", "Təchizatçılar", "Təchizatçıları əlavə edin, borcları izləyin.",
+             ["Alış tarixçəsi və ümumi məbləğ", "Ay sonu hesablaşma üçün borc qeydi",
+              "Təmirdən avtomatik təchizatçı borcu yaratmaq"]),
+            ("Wallet", "primary", "Kassa", "Gəlir və xərcləri idarə edin, kassa balansını görün.",
+             ["Xidmət ödənişləri və digər gəlirlər",
+              "Xərclər və təchizatçı ödənişləri balansdan çıxılır", "Bütün əməliyyatların tarixçəsi"]),
+            ("BarChart3", "dark", "Hesabatlar", "Gündəlik, aylıq, illik analizlər və qrafiklər.",
+             ["İstənilən tarix aralığı üzrə hesabat", "Xidmət və təchizatçı üzrə analiz",
+              "Ümumi satış, maya, xərc və xalis qazanc"]),
+            ("ShieldCheck", "primary", "Zəmanətlər", "Zəmanət müddətlərini izləyin, müştərilərə xəbərdarlıq edin.",
+             ["Təhvildən sonra zəmanət avtomatik geri sayılır", "Bitməyə 3 gün qalanlar ayrıca görünür",
+              "7 / 14 / 30 / 90 gün və ya zəmanətsiz"]),
+            ("Printer", "dark", "Qəbz / Çap", "Rəsmi qəbz və təhvil-təslim sənədlərini çap edin.",
+             ["A4 formatında səliqəli təhvil-təslim aktı", "Servisin öz zəmanət şərtləri mətni",
+              "Müştəri və usta imza sahələri"]),
         ]
         for i, (icon, tone, title, short, points) in enumerate(items):
             FeatureItem.objects.update_or_create(
@@ -127,60 +127,60 @@ class Command(BaseCommand):
                     "points": "\n".join(points), "order": i, "is_active": True,
                 },
             )
-        self.say(f"Funksiyalar: {len(items)} kart yaz�ld�.")
+        self.say(f"Funksiyalar: {len(items)} kart yazıldı.")
 
-    # -------------------------------------------------------------------------- Haqq�m�zda
+    # -------------------------------------------------------------------------- Haqqımızda
     def seed_about_values(self):
         items = [
-            ("Gauge", "Sad?lik",
-             "M?qs?d m�hasibat proqram� kimi m�r?kk?b sistem yox, ustan�n g�nd?lik i�ini "
-             "s�r?tl?ndir?n rahat al?tdir. M��t?rid?n �apa q?d?r proses bir ne�? klikdir."),
-            ("Lock", "M?lumat t?hl�k?sizliyi",
-             "H?r servis yaln�z �z m?lumat�n� g�r�r. M��t?ri, g?lir, x?rc, t?chizat�� v? t?mir "
-             "m?lumatlar� ba�qa servis? he� vaxt g�r�nm�r."),
-            ("Puzzle", "B�y�m?y? a��q",
-             "Sistem modul ?sasl�d�r: filial, i��i rollar�, anbar v? yeni imkanlar biznesiniz "
-             "b�y�d�kc? ?lav? olunur."),
+            ("Gauge", "Sadəlik",
+             "Məqsəd mühasibat proqramı kimi mürəkkəb sistem yox, ustanın gündəlik işini "
+             "sürətləndirən rahat alətdir. Müştəridən çapa qədər proses bir neçə klikdir."),
+            ("Lock", "Məlumat təhlükəsizliyi",
+             "Hər servis yalnız öz məlumatını görür. Müştəri, gəlir, xərc, təchizatçı və təmir "
+             "məlumatları başqa servisə heç vaxt görünmür."),
+            ("Puzzle", "Böyüməyə açıq",
+             "Sistem modul əsaslıdır: filial, işçi rolları, anbar və yeni imkanlar biznesiniz "
+             "böyüdükcə əlavə olunur."),
         ]
         for i, (icon, title, text) in enumerate(items):
             AboutValue.objects.update_or_create(
                 title=title, defaults={"icon": icon, "text": text, "order": i, "is_active": True},
             )
-        self.say(f"Haqq�m�zda: {len(items)} d?y?r kart� yaz�ld�.")
+        self.say(f"Haqqımızda: {len(items)} dəyər kartı yazıldı.")
 
-    # --------------------------------------------------------------------- Nec? i�l?yir (Ana s.)
+    # --------------------------------------------------------------------- Necə işləyir (Ana s.)
     def seed_home_steps(self):
         items = [
-            ("1", "M��t?ri v? cihaz� qeyd edin",
-             "M��t?ri, cihaz, �ikay?t v? g�r�l?c?k i�i bir ne�? klikl? ?lav? edin."),
-            ("2", "Maya, sat�� v? t?chizat��n� se�in",
-             "Qazanc avtomatik hesablan�r, t?chizat�� borcu is? laz�m olarsa avtomatik yaz�l�r."),
-            ("3", "T?hvil verin v? �ap edin",
-             "�d?ni�i qeyd edin, A4 q?bz �ap edin, z?man?t avtomatik geri sayma�a ba�las�n."),
+            ("1", "Müştəri və cihazı qeyd edin",
+             "Müştəri, cihaz, şikayət və görüləcək işi bir neçə kliklə əlavə edin."),
+            ("2", "Maya, satış və təchizatçını seçin",
+             "Qazanc avtomatik hesablanır, təchizatçı borcu isə lazım olarsa avtomatik yazılır."),
+            ("3", "Təhvil verin və çap edin",
+             "Ödənişi qeyd edin, A4 qəbz çap edin, zəmanət avtomatik geri saymağa başlasın."),
         ]
         for i, (number, title, desc) in enumerate(items):
             HomeStep.objects.update_or_create(
                 title=title, defaults={"number": number, "description": desc, "order": i, "is_active": True},
             )
-        self.say(f"\"Nec? i�l?yir\": {len(items)} add�m yaz�ld�.")
+        self.say(f"\"Necə işləyir\": {len(items)} addım yazıldı.")
 
     # ---------------------------------------------------------------------------- Planlar
     def seed_plans(self):
         plans = [
             dict(name="Basic", price_monthly=19, max_branches=1, max_users=3, sort_order=1,
                  is_featured=False, show_on_pricing_page=True,
-                 public_description="T?k usta v? ki�ik servisl?r ���n",
+                 public_description="Tək usta və kiçik servislər üçün",
                  public_features=[
-                     "M��t?ril?r v? t?mir qeydiyyat�", "Kassa, x?rcl?r v? borclar",
-                     "Z?man?t izl?m? v? A4 q?bz", "Anbar v? t?chizat��lar", "Hesabatlar v? analitika",
+                     "Müştərilər və təmir qeydiyyatı", "Kassa, xərclər və borclar",
+                     "Zəmanət izləmə və A4 qəbz", "Anbar və təchizatçılar", "Hesabatlar və analitika",
                  ]),
             dict(name="Pro", price_monthly=49, max_branches=5, max_users=15, sort_order=2,
                  is_featured=True, show_on_pricing_page=True,
-                 public_description="B�y�y?n v? �ox filiall� servisl?r ���n",
+                 public_description="Böyüyən və çox filiallı servislər üçün",
                  public_features=[
-                     "Basic plan�n b�t�n imkanlar�", "5 filialad?k bir hesabda",
-                     "15 istifad?�iy? q?d?r (usta, t?l?b?, kassir)",
-                     "Rol v? icaz?l?rin geni� idar?si", "B�y�k komanda ���n rahat n?zar?t",
+                     "Basic planın bütün imkanları", "5 filialadək bir hesabda",
+                     "15 istifadəçiyə qədər (usta, tələbə, kassir)",
+                     "Rol və icazələrin geniş idarəsi", "Böyük komanda üçün rahat nəzarət",
                  ]),
         ]
         for p in plans:
@@ -188,4 +188,4 @@ class Command(BaseCommand):
             Plan.objects.update_or_create(
                 name=p.pop("name"), defaults={**p, "public_features": "\n".join(features)},
             )
-        self.say(f"Planlar: {len(plans)} plan yaz�ld� (Basic, Pro).")
+        self.say(f"Planlar: {len(plans)} plan yazıldı (Basic, Pro).")
