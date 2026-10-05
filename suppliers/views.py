@@ -97,6 +97,44 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         fresh = self.get_queryset().get(pk=supplier.pk)
         return Response(SupplierSerializer(fresh).data)
 
+    @action(detail=True, methods=["patch"], url_path=r"purchases/(?P<purchase_id>\d+)/payments/(?P<payment_id>\d+)")
+    def update_purchase_payment(self, request, pk=None, purchase_id=None, payment_id=None):
+        """
+        PATCH /api/suppliers/<id>/purchases/<purchase_id>/payments/<payment_id>/   { amount }
+        Konkret bir ödəniş qeydinin məbləğini düzəldir (məs. səhv yazılıb). Alışın
+        `paid_amount`-u da fərqə görə (yeni - köhnə) uyğunlaşdırılır, 0 ilə alışın
+        ümumi məbləği arasında qalmaq şərtilə.
+        """
+        supplier = self.get_object()
+        purchase = supplier.purchases.filter(pk=purchase_id).first()
+        if not purchase:
+            return Response({"detail": "Alış tapılmadı."}, status=status.HTTP_404_NOT_FOUND)
+        payment = purchase.payments.filter(pk=payment_id).first()
+        if not payment:
+            return Response({"detail": "Ödəniş tapılmadı."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            new_amount = Decimal(str(request.data.get("amount")))
+        except Exception:
+            return Response({"detail": "Məbləğ düzgün deyil."}, status=status.HTTP_400_BAD_REQUEST)
+        if new_amount <= 0:
+            return Response({"detail": "Məbləğ sıfırdan böyük olmalıdır."}, status=status.HTTP_400_BAD_REQUEST)
+
+        delta = new_amount - payment.amount
+        new_paid_amount = purchase.paid_amount + delta
+        if new_paid_amount < 0 or new_paid_amount > purchase.amount:
+            return Response(
+                {"detail": f"Bu dəyişiklik alışın ödənilmiş məbləğini 0–{purchase.amount} AZN "
+                            f"aralığından kənara çıxarır."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        payment.amount = new_amount
+        payment.save(update_fields=["amount"])
+        purchase.paid_amount = new_paid_amount
+        purchase.save(update_fields=["paid_amount"])
+
+        fresh = self.get_queryset().get(pk=supplier.pk)
+        return Response(SupplierSerializer(fresh).data)
+
     @action(detail=True, methods=["post"], url_path="purchases")
     def add_purchase(self, request, pk=None):
         supplier = self.get_object()

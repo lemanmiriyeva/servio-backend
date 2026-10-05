@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from accounts.models import Module
 from .models import Customer
 
 
@@ -7,11 +8,12 @@ class CustomerSerializer(serializers.ModelSerializer):
     repair_count = serializers.SerializerMethodField()
     total_spent = serializers.SerializerMethodField()
     total_debt = serializers.SerializerMethodField()
+    total_profit = serializers.SerializerMethodField()
 
     class Meta:
         model = Customer
         fields = ["id", "full_name", "phone", "email", "note", "initials",
-                  "repair_count", "total_spent", "total_debt", "created_at"]
+                  "repair_count", "total_spent", "total_debt", "total_profit", "created_at"]
         read_only_fields = ["id", "created_at"]
 
     def get_repair_count(self, obj):
@@ -27,5 +29,17 @@ class CustomerSerializer(serializers.ModelSerializer):
         # bura düşmürdü və göstərilən rəqəm real borcdan az görünürdü.
         return sum(
             (max(r.remaining_debt, 0) for r in obj.repair_orders.exclude(status="cancelled")),
+            0,
+        )
+
+    def get_total_profit(self, obj):
+        # 'Gəlir / net mənfəət rəqəmləri' icazəsi olmayan rola görünmür (RepairOrderDetailSerializer-dəki
+        # eyni maskalama qaydası ilə).
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated or not user.has_module_permission(Module.REVENUE_NUMBERS):
+            return None
+        return sum(
+            (r.profit for r in obj.repair_orders.exclude(status="cancelled")),
             0,
         )

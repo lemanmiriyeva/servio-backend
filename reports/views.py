@@ -11,7 +11,7 @@ from accounts.mixins import HasModulePermission
 from accounts.models import Module
 from customers.models import Customer
 from repairs.models import RepairOrder, RepairStatus, PaymentStatus
-from finance.models import CashTransaction, TransactionType
+from finance.models import CashTransaction, TransactionType, compute_cashbox_summary
 from suppliers.models import Supplier
 from marketplace.models import MarketplaceOrder, OrderStatus
 
@@ -88,6 +88,15 @@ class DashboardView(APIView):
             data["month_income"] = None
             data["today_payments_count"] = None
             data["revenue_hidden"] = True
+
+        # Kassa balansı — Kassa səhifəsi ilə EYNİ hesablamadan (compute_cashbox_summary),
+        # xərc və təchizatçı ödənişi artıq düşülmüş halda. Bu, 'kassa' modulu icazəsi olan
+        # rola göstərilir (gəlir/mənfəət icazəsindən fərqli — kassiyyər mənfəəti görməyə bilər,
+        # amma kassa balansını görməlidir).
+        if request.user.has_module_permission(Module.CASHBOX):
+            data["cash_balance"] = compute_cashbox_summary(shop)["current_balance"]
+        else:
+            data["cash_balance"] = None
         return Response(data)
 
 
