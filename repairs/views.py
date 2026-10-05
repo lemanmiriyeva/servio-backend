@@ -150,7 +150,12 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         repair = self.get_object()
         try:
             buf = _render_warranty_pdf(repair)
-        except RuntimeError:
+        except RuntimeError as exc:
+            # DİQQƏT: əvvəllər bu xəta sükutla udulurdu — server loguna heç nə yazılmırdı,
+            # bu da server tərəfindəki əsl səbəbi tapmağı mümkünsüz edirdi. İndi tam traceback
+            # `docker logs`-da görünür.
+            import logging
+            logging.getLogger("repairs").error("Zəmanət PDF generasiyası uğursuz oldu", exc_info=exc)
             return Response({"detail": "PDF yaradıla bilmədi — serverdə texniki xəta. Dəstəyə müraciət edin."}, status=500)
         # DİQQƏT: burada DRF-in Response() YOX, Django-nun HttpResponse()-u istifadə
         # olunur — DRF Response() cavabı JSON renderer-dən keçirməyə çalışır, PDF
@@ -170,7 +175,9 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
 
         try:
             buf = _render_warranty_pdf(repair)
-        except RuntimeError:
+        except RuntimeError as exc:
+            import logging
+            logging.getLogger("repairs").error("Zəmanət PDF generasiyası uğursuz oldu (mail)", exc_info=exc)
             return Response({"detail": "PDF yaradıla bilmədi, mail göndərilmədi — serverdə texniki xəta."}, status=500)
 
         email = EmailMessage(
