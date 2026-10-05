@@ -19,36 +19,68 @@ from .serializers import (
 
 def _render_warranty_pdf(repair):
     """
-    Zəmanət PDF-ni yaradır. Standart PDF şriftləri (Helvetica və s.) Azərbaycan
-    hərflərini (ə, ş, ğ, ı, ö, ü, ç) və "№" işarəsini çəkə bilmir — mətn boş
-    qutular kimi çıxır. Ona görə repo-ya əlavə olunmuş DejaVu Sans şriftini
-    (bütün bu simvolları əhatə edir) @font-face ilə PDF-ə göndəririk.
+    Zəmanət PDF-ni yaradır. Dizayn "display:flex" ilə qurulub (yan-yana başlıq/müştəri/
+    cihaz sətirləri) — əvvəlki mühərrik olan xhtml2pdf (pisa) flex/grid dəstəkləmirdi, bu
+    da PDF-də sətirlərin yan-yana yox, üst-üstə (sıralı) çıxmasına səbəb olurdu. WeasyPrint
+    müasir CSS-i (flexbox daxil) düzgün dəstəklədiyi üçün dizaynın HTML/CSS kodu DƏYİŞMƏDƏN
+    işləyir.
+
+    Standart PDF şriftləri Azərbaycan hərflərini (ə, ş, ğ, ı, ö, ü, ç) çəkə bilmədiyi üçün
+    repo-ya əlavə olunmuş DejaVu Sans şriftini @font-face ilə göndəririk (Google Fonts-dakı
+    "Manrope" əvəzinə — PDF generasiyası zamanı xarici şriftə internet sorğusu etmək
+    etibarsızdır: server şəbəkəsi məhdud ola bilər, bu da PDF-in sükutla yarımçıq çıxmasına
+    səbəb olar).
     """
     import io
     import pathlib
     from django.contrib.staticfiles import finders
     from django.template.loader import render_to_string
-    from xhtml2pdf import pisa
+    from weasyprint import HTML
 
     def _font_uri(name):
         path = finders.find(f"repairs/fonts/{name}")
         return pathlib.Path(path).as_uri() if path else ""
 
+    def _fmt_date(dt):
+        return dt.strftime("%d.%m.%Y") if dt else "—"
+
+    def _fmt_time(dt):
+        return dt.strftime("%H:%M") if dt else ""
+
+    shop = repair.shop
     html = render_to_string("repairs/warranty_pdf.html", {
-        "repair": repair, "shop": repair.shop,
         "font_regular": _font_uri("DejaVuSans.ttf"),
         "font_bold": _font_uri("DejaVuSans-Bold.ttf"),
+        "service_name": shop.name,
+        "repair_id": repair.number,
+        "delivery_date": _fmt_date(repair.delivered_at),
+        "delivery_time": _fmt_time(repair.delivered_at),
+        "customer_full_name": repair.customer.full_name,
+        "customer_phone": repair.customer.phone,
+        "device_brand": repair.device_brand,
+        "device_model": repair.device_model,
+        "device_serial": repair.device_imei or repair.device_serial or "—",
+        "service_description": repair.work_done_note or repair.issue_description,
+        "total_price": repair.sale_price,
+        "warranty_days": repair.warranty_days,
+        "warranty_start": _fmt_date(repair.warranty_started_at),
+        "warranty_end": _fmt_date(repair.warranty_end_date),
+        "service_phone": shop.phone,
+        "service_address": shop.address,
     })
     buf = io.BytesIO()
-    pdf_status = pisa.CreatePDF(io.BytesIO(html.encode("utf-8")), dest=buf, encoding="utf-8")
-    # DİQQƏT: pisa.CreatePDF xəta olanda belə `buf`-u sükutla yarımçıq/boş qaytara bilər —
-    # yoxlamasaq, bu yarımçıq PDF faylı mailə "boş əlavə" kimi gedir (müştəri "PDF mail ilə
-    # getmir" deyə şikayət edir), ya da yüklənəndə açılmayan sınıq fayl olur. Ona görə həm
-    # pisa-nın özünün bildirdiyi xətaları, həm də nəticədə faktiki boş qalan PDF-i yoxlayırıq.
-    if pdf_status.err or not buf.getvalue():
-        raise RuntimeError(
-            f"Zəmanət PDF-i yaradıla bilmədi (repair #{repair.pk}, pisa.err={pdf_status.err})."
-        )
+    try:
+        HTML(string=html).write_pdf(buf)
+    except Exception as exc:
+        # Çağıran tərəf (warranty_pdf/warranty_email action-ları) yalnız RuntimeError tutur —
+        # WeasyPrint-in ata biləcəyi müxtəlif xəta tiplərini (şrift, parsing və s.) də həmin
+        # tutma bloğunun işləməsi üçün RuntimeError-a çeviririk.
+        raise RuntimeError(f"Zəmanət PDF-i yaradıla bilmədi (repair #{repair.pk}): {exc}") from exc
+    # DİQQƏT: WeasyPrint xəta olanda exception atır (sükutla yarımçıq fayl qaytarmır), amma
+    # hər ehtimala qarşı nəticənin boş olmadığını yenə də yoxlayırıq — yarımçıq/boş PDF faylı
+    # mailə "boş əlavə" kimi getməsin, ya da yüklənəndə açılmayan sınıq fayl olmasın deyə.
+    if not buf.getvalue():
+        raise RuntimeError(f"Zəmanət PDF-i yaradıla bilmədi (repair #{repair.pk}).")
     return buf
 
 

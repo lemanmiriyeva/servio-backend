@@ -8,4 +8,4 @@ django-jazzmin>=3.0,<4
 django-environ>=0.11,<1
 mssql-django>=1.5,<2
 pyodbc>=5.1,<6
-xhtml2pdf>=0.2.16,<0.3
+weasyprint>=62,<63
