@@ -1,6 +1,9 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
-from .views import SupportTicketViewSet, SubscriptionPaymentViewSet, PlatformDashboardView, PlatformResourcesView
+from .views import (
+    SupportTicketViewSet, SubscriptionPaymentViewSet, PlatformDashboardView, PlatformResourcesView,
+    ContactInquiryPublicCreateView,
+)
 from .resources import RESOURCES, build_viewset
 
 router = DefaultRouter()
@@ -15,4 +18,6 @@ for _res in RESOURCES:
 urlpatterns = router.urls + generic.urls + [
     path("dashboard/", PlatformDashboardView.as_view(), name="platform-dashboard"),
     path("resources/", PlatformResourcesView.as_view(), name="platform-resources"),
+    # İctimai sayt — giriş tələb olunmur (bax: ContactInquiryPublicCreateView).
+    path("public-contact/", ContactInquiryPublicCreateView.as_view(), name="public-contact"),
 ]

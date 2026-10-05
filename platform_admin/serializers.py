@@ -1,5 +1,13 @@
 from rest_framework import serializers
-from .models import SupportTicket, SubscriptionPayment
+from .models import SupportTicket, SubscriptionPayment, ContactInquiry
+
+
+class ContactInquiryPublicSerializer(serializers.ModelSerializer):
+    """İctimai '/elaqe' formu üçün — AllowAny, yalnız yaratmaq olar."""
+
+    class Meta:
+        model = ContactInquiry
+        fields = ["full_name", "phone", "message"]
 
 
 class SupportTicketSerializer(serializers.ModelSerializer):

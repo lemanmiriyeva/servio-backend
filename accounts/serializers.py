@@ -10,9 +10,12 @@ User = get_user_model()
 
 
 class ShopMiniSerializer(serializers.ModelSerializer):
+    days_to_payment = serializers.ReadOnlyField()
+
     class Meta:
         model = Shop
-        fields = ["id", "name", "code", "city", "currency", "default_warranty_days", "status"]
+        fields = ["id", "name", "code", "city", "currency", "default_warranty_days", "status",
+                  "next_payment_at", "days_to_payment"]
 
 
 class BranchMiniSerializer(serializers.ModelSerializer):

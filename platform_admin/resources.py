@@ -57,7 +57,7 @@ class Resource:
 # göründüyü bölmə olmasın; əvəzinə hər mağazanın öz məlumatı "Mağazalar" bölməsindən o mağazaya
 # daxil olanda görünsün. Sayt məzmunu (marketinq saytı) və Planlar/Abunələr isə ayrı-ayrı,
 # aydın bölmələr kimi dursun.
-SEC_SHOPS = "Mağazalar"
+SEC_SHOPS = "Müştəri bazası"
 SEC_PLATFORM = "Platforma"
 SEC_PLANS = "Planlar və Abunələr"
 SEC_SITE = "Sayt məzmunu"
@@ -82,7 +82,7 @@ SITE_GENERAL = "Sayt: Loqo və marka"
 # açılır (bax: frontend `/platform/shops/[id]`). API-ları yenə işləkdir, sadəcə əsas sidebar-da
 # bütün mağazaların datası bir yerdə qarışıq göstərilmir.
 RESOURCES = [
-    Resource("shops", "tenants.Shop", "Mağazalar", SHOPS_GROUP,
+    Resource("shops", "tenants.Shop", "Müştəri bazası", SHOPS_GROUP,
              ["name", "code", "owner_full_name", "city", "plan", "status", "next_payment_at",
               "is_active", "disabled_reason"],
              extra_kwargs={"code": {"required": False, "allow_blank": True}},
@@ -137,6 +137,8 @@ RESOURCES = [
              ["role", "module", "is_allowed"], section=SEC_PLATFORM),
     Resource("tickets", "platform_admin.SupportTicket", "Dəstək sorğuları", PLATFORM,
              ["subject", "shop", "status", "created_at"], section=SEC_PLATFORM),
+    Resource("contact-inquiries", "platform_admin.ContactInquiry", "Müştəri sorğuları", PLATFORM,
+             ["full_name", "phone", "message", "status", "created_at"], section=SEC_PLATFORM),
     Resource("repair-payments", "repairs.RepairPayment", "Təmir ödənişləri", PLATFORM,
              ["repair", "amount", "method", "paid_at"], section=SEC_PLATFORM),
     Resource("repair-parts", "inventory.RepairPartUsage", "Təmirdə işlənən hissələr", PLATFORM,
@@ -317,6 +319,11 @@ def build_serializer(res: Resource):
     if res.key == "users":
         attrs["password"] = serializers.CharField(write_only=True, required=False, allow_blank=True, min_length=6)
         bases = (PasswordMixin, serializers.ModelSerializer)
+    if res.key == "shops":
+        # Mağazanın öz "Ətraflı" səhifəsində "növbəti ödənişə qalan gün" göstərmək üçün —
+        # bunlar modeldə @property-dir, "fields": "__all__" onları özü ilə gətirmir.
+        attrs["days_to_payment"] = serializers.IntegerField(read_only=True)
+        attrs["payment_urgency"] = serializers.CharField(read_only=True)
     return type(f"{model.__name__}PlatformSerializer", bases, attrs)
 
 
@@ -409,6 +416,13 @@ def build_viewset(res: Resource):
             # basmasın deyə.
             if res.key == "payments" and getattr(instance, "shop_id", None):
                 instance.shop.reactivate()
+            # Yeni mağaza birbaşa plan seçilərək yaradılıbsa, ilkin abunə ödənişi avtomatik
+            # qeydə alınır (1 aylıq dövr) və mağaza elə həmin andan aktivləşir — Baş Admin
+            # ayrıca "Abunə ödənişləri"nə keçib əl ilə ilk ödənişi yazmasın deyə.
+            if res.key == "shops" and getattr(instance, "plan_id", None):
+                from platform_admin.models import SubscriptionPayment
+                SubscriptionPayment.objects.create(shop=instance, amount=instance.plan.price_monthly)
+                instance.reactivate()
 
         def perform_update(self, serializer):
             serializer.save(**self._shop_locked_kwargs())

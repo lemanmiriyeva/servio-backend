@@ -20,3 +20,13 @@ class CashTransactionSerializer(serializers.ModelSerializer):
         validated_data["branch"] = request.user.branch
         validated_data["created_by"] = request.user
         return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # Yaradıldıqdan sonra YALNIZ "düzəliş" sahələri (təsvir, üsul, kateqoriya) dəyişilə bilər.
+        # "Məbləğ"/"Növ"/təmir-təchizatçı bağlantısı HEÇ VAXT redaktə yolu ilə dəyişmir — bunlar
+        # başqa qeydlərin (RepairPayment, təchizatçı borc FIFO-su) əks nüsxəsidir; onları burada
+        # dəyişmək həmin qeydlərlə kassanı sinxronsuz qoyardı. Məbləğ səhvdirsə, düzəliş YENİ
+        # əməliyyat kimi aparılmalıdır.
+        for locked in ("amount", "type", "repair", "supplier"):
+            validated_data.pop(locked, None)
+        return super().update(instance, validated_data)

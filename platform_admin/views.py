@@ -1,15 +1,16 @@
 from decimal import Decimal
 from django.db.models import Sum
-from rest_framework import viewsets
+from rest_framework import viewsets, status as http_status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.throttling import ScopedRateThrottle
 
 from accounts.mixins import IsPlatformAdmin
 from tenants.models import Shop
 from .models import SupportTicket, SubscriptionPayment
-from .serializers import SupportTicketSerializer, SubscriptionPaymentSerializer
+from .serializers import SupportTicketSerializer, SubscriptionPaymentSerializer, ContactInquiryPublicSerializer
 from .resources import RESOURCES, build_meta, _is_shop_admin
 
 
@@ -17,6 +18,23 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     queryset = SupportTicket.objects.select_related("shop").all()
     serializer_class = SupportTicketSerializer
     permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+
+class ContactInquiryPublicCreateView(APIView):
+    """
+    POST /api/platform/public-contact/   { full_name, phone, message }
+    İctimai sayt '/elaqe' formu — giriş TƏLƏB OLUNMUR, hər kəs göndərə bilər.
+    Nəticə Baş Adminin panelində 'Müştəri sorğuları' bölməsinə düşür.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "contact"
+
+    def post(self, request):
+        s = ContactInquiryPublicSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save()
+        return Response({"detail": "Göndərildi."}, status=http_status.HTTP_201_CREATED)
 
 
 class SubscriptionPaymentViewSet(viewsets.ReadOnlyModelViewSet):

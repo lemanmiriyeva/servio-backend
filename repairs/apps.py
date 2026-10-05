@@ -13,3 +13,5 @@ class RepairsConfig(AppConfig):
         # Linux/macOS-da onsuz da UTF-8-dir, zərərsizdir.
         import locale
         locale.getpreferredencoding = lambda do_setlocale=True: "utf-8"
+
+        from . import signals  # noqa: F401 — status tarixçəsi siqnalını qeydə alır

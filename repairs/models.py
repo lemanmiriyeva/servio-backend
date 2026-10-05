@@ -38,6 +38,10 @@ class RepairOrder(models.Model):
     device_imei = models.CharField(max_length=64, blank=True)
     device_serial = models.CharField(max_length=64, blank=True)
     accessories_note = models.CharField(max_length=255, blank=True, help_text="Qablaşdırma, adapter və s.")
+    technician_name = models.CharField(
+        max_length=120, blank=True,
+        help_text="Cihaz/detal xarici ustaya göndərilibsə, onun adı (\"Servisə göndərildi\" seçilərkən).",
+    )
 
     # İş
     issue_description = models.TextField()
@@ -130,6 +134,21 @@ class RepairOrder(models.Model):
 
     def __str__(self):
         return self.number
+
+
+class RepairStatusHistory(models.Model):
+    """Hər status dəyişikliyinin vaxt izi — 'nə vaxtdan təmir prosesindədir, nə vaxtdan təhvil
+    verilib' kimi sualları cavablandırmaq üçün (əvvəllər yalnız received_at/delivered_at var idi,
+    aralıq statuslar — diaqnostika, təmir prosesi, hazırdır — üçün heç bir vaxt saxlanmırdı)."""
+    repair = models.ForeignKey(RepairOrder, on_delete=models.CASCADE, related_name="status_history")
+    status = models.CharField(max_length=20, choices=RepairStatus.choices)
+    changed_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["changed_at"]
+
+    def __str__(self):
+        return f"{self.repair.number} · {self.get_status_display()} · {self.changed_at}"
 
 
 class PaymentMethod(models.TextChoices):

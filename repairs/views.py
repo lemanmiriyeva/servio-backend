@@ -45,7 +45,7 @@ def _render_warranty_pdf(repair):
 
 
 class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
-    queryset = RepairOrder.objects.select_related("customer").prefetch_related("payments").all()
+    queryset = RepairOrder.objects.select_related("customer").prefetch_related("payments", "status_history").all()
     permission_classes = [IsAuthenticated, HasModulePermission]
     module_code = Module.REPAIRS
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]

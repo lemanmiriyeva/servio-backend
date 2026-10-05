@@ -21,4 +21,11 @@ class CustomerSerializer(serializers.ModelSerializer):
         return sum((r.sale_price for r in obj.repair_orders.exclude(status="cancelled")), 0)
 
     def get_total_debt(self, obj):
-        return sum((r.remaining_debt for r in obj.repair_orders.filter(payment_status="debt")), 0)
+        # Müştərinin REAL borcu — təkcə artıq 'borc' (təhvil verilib, ödənilməyib) statusunda
+        # olanlar yox, hələ təhvil verilməmiş (qismən ödənilmiş) sifarişlərin qalığı da daxildir.
+        # Əks halda, məsələn, təmir prosesindəki bir sifarişə görə ödənilməmiş məbləğ heç vaxt
+        # bura düşmürdü və göstərilən rəqəm real borcdan az görünürdü.
+        return sum(
+            (max(r.remaining_debt, 0) for r in obj.repair_orders.exclude(status="cancelled")),
+            0,
+        )

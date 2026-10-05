@@ -2,7 +2,9 @@ from rest_framework import serializers
 from customers.models import Customer
 from customers.serializers import CustomerSerializer
 from suppliers.models import SupplierPurchase
-from .models import RepairOrder, RepairPayment, RepairStatus, RepairWarrantyReturn, SupplierReturnStatus
+from .models import (
+    RepairOrder, RepairPayment, RepairStatus, RepairStatusHistory, RepairWarrantyReturn, SupplierReturnStatus,
+)
 
 
 class RepairPaymentSerializer(serializers.ModelSerializer):
@@ -109,6 +111,14 @@ class SupplierReturnDecisionSerializer(serializers.Serializer):
         return wr
 
 
+class RepairStatusHistorySerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = RepairStatusHistory
+        fields = ["status", "status_display", "changed_at"]
+
+
 class RepairOrderDetailSerializer(serializers.ModelSerializer):
     customer = CustomerSerializer(read_only=True)
     customer_id = serializers.PrimaryKeyRelatedField(
@@ -117,6 +127,7 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
     payments = RepairPaymentSerializer(many=True, read_only=True)
     supplier_purchases = serializers.SerializerMethodField()
     warranty_returns = RepairWarrantyReturnSerializer(many=True, read_only=True)
+    status_history = RepairStatusHistorySerializer(many=True, read_only=True)
     paid_amount = serializers.ReadOnlyField()
     remaining_debt = serializers.ReadOnlyField()
     profit = serializers.ReadOnlyField()
@@ -128,12 +139,14 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id", "number", "customer", "customer_id",
             "device_brand", "device_model", "device_imei", "device_serial", "accessories_note",
+            "technician_name",
             "issue_description", "work_done_note",
             "cost_price", "sale_price", "profit",
             "status", "payment_status", "debt_due_date",
             "warranty_days", "warranty_started_at", "warranty_end_date", "warranty_days_left",
             "received_at", "delivered_at",
-            "payments", "supplier_purchases", "warranty_returns", "paid_amount", "remaining_debt",
+            "payments", "supplier_purchases", "warranty_returns", "status_history",
+            "paid_amount", "remaining_debt",
             "created_at",
         ]
         read_only_fields = ["id", "number", "created_at"]
@@ -170,14 +183,19 @@ class RepairStatusUpdateSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=RepairStatus.choices)
 
     def save(self, **kwargs):
+        from django.utils import timezone
         repair: RepairOrder = self.context["repair"]
         new_status = self.validated_data["status"]
+        changed = new_status != repair.status
         repair.status = new_status
         if new_status == RepairStatus.DELIVERED and not repair.delivered_at:
-            from django.utils import timezone
             repair.delivered_at = timezone.now()
             repair.warranty_started_at = timezone.now().date()
         repair.save()
+        if changed:
+            # Hər status dəyişikliyinin vaxtı qeydə alınır ("nə vaxtdan təmir prosesindədir",
+            # "nə vaxtdan hazırdır" və s. sualları üçün — bax RepairStatusHistory).
+            RepairStatusHistory.objects.create(repair=repair, status=new_status)
         # Status dəyişəndə (xüsusən 'Təhvil verildi'-yə keçəndə) ödəniş statusunu
         # yenidən hesabla — qalıq borc varsa indi 'debt' kimi işarələnəcək.
         repair.recompute_payment_status()

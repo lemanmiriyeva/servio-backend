@@ -161,6 +161,8 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "login": "10/min",
         "anon": "120/min",
+        # İctimai '/elaqe' formu — spam/bot göndərişlərinin qarşısını almaq üçün.
+        "contact": "5/min",
     },
 }
 if not DEBUG:

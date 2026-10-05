@@ -60,6 +60,24 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         fresh = self.get_queryset().get(pk=supplier.pk)
         return Response(SupplierSerializer(fresh).data)
 
+    @action(detail=True, methods=["patch"], url_path=r"purchases/(?P<purchase_id>\d+)")
+    def update_purchase(self, request, pk=None, purchase_id=None):
+        """
+        PATCH /api/suppliers/<id>/purchases/<purchase_id>/   { description }
+        Yalnız TƏSVİR redaktə edilir — məbləğ/ödəniş dəyişmir, çünki FIFO ödəniş bölgüsü
+        artıq həmin məbləğə əsaslanıb tətbiq olunub; onu dəyişmək balansı pozardı.
+        """
+        supplier = self.get_object()
+        purchase = supplier.purchases.filter(pk=purchase_id).first()
+        if not purchase:
+            return Response({"detail": "Alış tapılmadı."}, status=status.HTTP_404_NOT_FOUND)
+        description = request.data.get("description")
+        if description is not None and description.strip():
+            purchase.description = description.strip()
+            purchase.save(update_fields=["description"])
+        fresh = self.get_queryset().get(pk=supplier.pk)
+        return Response(SupplierSerializer(fresh).data)
+
     @action(detail=True, methods=["post"], url_path="purchases")
     def add_purchase(self, request, pk=None):
         supplier = self.get_object()
