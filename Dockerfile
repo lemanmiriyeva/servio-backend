@@ -5,7 +5,21 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# WeasyPrint (zəmanət PDF-i üçün) Python paketindən başqa bu sistem kitabxanalarını tələb edir —
+# --- Microsoft ODBC Driver 18 (MSSQL-ə qoşulmaq üçün pyodbc-yə lazımdır) ---
+# libgssapi-krb5-2 msodbcsql18-in özünün asılı olduğu bir kitabxanadır —
+# --no-install-recommends onu ötürdüyü üçün açıq şəkildə əlavə edilib.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl gnupg2 apt-transport-https ca-certificates libgssapi-krb5-2 \
+    && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
+    && curl -fsSL https://packages.microsoft.com/config/debian/12/prod.list -o /etc/apt/sources.list.d/mssql-release.list \
+    && sed -i 's#deb \[arch=amd64#deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg arch=amd64#' /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc unixodbc-dev \
+    && apt-get purge -y curl gnupg2 \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- WeasyPrint (zəmanət PDF-i üçün) sistem kitabxanaları ---
 # onlarsız "cannot load library libgobject-2.0" kimi xəta ilə PDF generasiyası çökər.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 \
