@@ -63,18 +63,37 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["patch"], url_path=r"purchases/(?P<purchase_id>\d+)")
     def update_purchase(self, request, pk=None, purchase_id=None):
         """
-        PATCH /api/suppliers/<id>/purchases/<purchase_id>/   { description }
-        Yalnız TƏSVİR redaktə edilir — məbləğ/ödəniş dəyişmir, çünki FIFO ödəniş bölgüsü
-        artıq həmin məbləğə əsaslanıb tətbiq olunub; onu dəyişmək balansı pozardı.
+        PATCH /api/suppliers/<id>/purchases/<purchase_id>/   { description, amount }
+        Təsvir həmişə sərbəst redaktə olunur. Məbləğ də redaktə oluna bilər, amma artıq
+        ödənilmiş hissədən AZ ola bilməz (FIFO ödəniş bölgüsü əlavə ödənilmiş məbləğə
+        əsaslanıb tətbiq olunub — onu "geri götürmək" mümkün deyil, sadəcə qalıq borcu
+        (amount - paid_amount) düzgün saxlamalıyıq).
         """
         supplier = self.get_object()
         purchase = supplier.purchases.filter(pk=purchase_id).first()
         if not purchase:
             return Response({"detail": "Alış tapılmadı."}, status=status.HTTP_404_NOT_FOUND)
         description = request.data.get("description")
+        update_fields = []
         if description is not None and description.strip():
             purchase.description = description.strip()
-            purchase.save(update_fields=["description"])
+            update_fields.append("description")
+        if request.data.get("amount") is not None:
+            try:
+                amount = Decimal(str(request.data.get("amount")))
+            except Exception:
+                return Response({"detail": "Məbləğ düzgün deyil."}, status=status.HTTP_400_BAD_REQUEST)
+            if amount <= 0:
+                return Response({"detail": "Məbləğ sıfırdan böyük olmalıdır."}, status=status.HTTP_400_BAD_REQUEST)
+            if amount < purchase.paid_amount:
+                return Response(
+                    {"detail": f"Məbləğ artıq ödənilmiş {purchase.paid_amount} AZN-dən az ola bilməz."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            purchase.amount = amount
+            update_fields.append("amount")
+        if update_fields:
+            purchase.save(update_fields=update_fields)
         fresh = self.get_queryset().get(pk=supplier.pk)
         return Response(SupplierSerializer(fresh).data)
 

@@ -20,6 +20,7 @@ class RepairOrderListSerializer(serializers.ModelSerializer):
     customer_initials = serializers.CharField(source="customer.initials", read_only=True)
     warranty_days_left = serializers.ReadOnlyField()
     remaining_debt = serializers.ReadOnlyField()
+    last_status_at = serializers.ReadOnlyField()
 
     class Meta:
         model = RepairOrder
@@ -27,7 +28,7 @@ class RepairOrderListSerializer(serializers.ModelSerializer):
             "id", "number", "customer", "customer_name", "customer_initials",
             "device_brand", "device_model", "issue_description",
             "status", "payment_status", "sale_price", "remaining_debt",
-            "warranty_days_left", "received_at", "delivered_at",
+            "warranty_days_left", "received_at", "delivered_at", "last_status_at",
         ]
 
 

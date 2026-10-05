@@ -109,6 +109,18 @@ class RepairOrder(models.Model):
             return None
         return (end - timezone.now().date()).days
 
+    @property
+    def last_status_at(self):
+        """Hazırkı statusun nə vaxt qoyulduğu — siyahı cədvəlində 'bu tarixdə bu status
+        olub' sualına cavab üçün. Tarixçə (RepairStatusHistory) varsa oradan, köhnə
+        qeydlər üçün (tarixçə yazılmazdan əvvəl yaradılmış təmirlər) received_at-a düşür."""
+        # Meta.ordering = ["changed_at"] (ən köhnədən ən yeniyə) — ona görə sonuncu element
+        # son dəyişiklikdir. list() prefetch_related keşindən istifadə edir, əlavə sorğu açmır.
+        history = list(self.status_history.all())
+        if history:
+            return history[-1].changed_at
+        return self.delivered_at if self.status == RepairStatus.DELIVERED else self.received_at
+
     def recompute_payment_status(self, save=True):
         """
         Ödəniş statusunu real vəziyyətə uyğun yeniləyir — bax bölmə 9:

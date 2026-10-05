@@ -8,7 +8,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from accounts.mixins import ShopScopedQuerysetMixin, HasModulePermission
 from accounts.models import Module
-from .models import RepairOrder, PaymentStatus, RepairWarrantyReturn, SupplierReturnStatus
+from .models import RepairOrder, RepairStatus, RepairWarrantyReturn, SupplierReturnStatus
 from .serializers import (
     RepairOrderListSerializer, RepairOrderDetailSerializer,
     RepairStatusUpdateSerializer, RepairPaymentCreateSerializer,
@@ -40,7 +40,15 @@ def _render_warranty_pdf(repair):
         "font_bold": _font_uri("DejaVuSans-Bold.ttf"),
     })
     buf = io.BytesIO()
-    pisa.CreatePDF(io.BytesIO(html.encode("utf-8")), dest=buf, encoding="utf-8")
+    pdf_status = pisa.CreatePDF(io.BytesIO(html.encode("utf-8")), dest=buf, encoding="utf-8")
+    # DİQQƏT: pisa.CreatePDF xəta olanda belə `buf`-u sükutla yarımçıq/boş qaytara bilər —
+    # yoxlamasaq, bu yarımçıq PDF faylı mailə "boş əlavə" kimi gedir (müştəri "PDF mail ilə
+    # getmir" deyə şikayət edir), ya da yüklənəndə açılmayan sınıq fayl olur. Ona görə həm
+    # pisa-nın özünün bildirdiyi xətaları, həm də nəticədə faktiki boş qalan PDF-i yoxlayırıq.
+    if pdf_status.err or not buf.getvalue():
+        raise RuntimeError(
+            f"Zəmanət PDF-i yaradıla bilmədi (repair #{repair.pk}, pisa.err={pdf_status.err})."
+        )
     return buf
 
 
@@ -108,7 +116,10 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
     def warranty_pdf(self, request, pk=None):
         """Zəmanət sənədini PDF kimi qaytarır (çap/yükləmə üçün)."""
         repair = self.get_object()
-        buf = _render_warranty_pdf(repair)
+        try:
+            buf = _render_warranty_pdf(repair)
+        except RuntimeError:
+            return Response({"detail": "PDF yaradıla bilmədi — serverdə texniki xəta. Dəstəyə müraciət edin."}, status=500)
         # DİQQƏT: burada DRF-in Response() YOX, Django-nun HttpResponse()-u istifadə
         # olunur — DRF Response() cavabı JSON renderer-dən keçirməyə çalışır, PDF
         # baytlarını json.dumps() etmək isə "UnicodeDecodeError" ilə çökür.
@@ -125,7 +136,10 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         if not repair.customer.email:
             return Response({"detail": "Bu müştərinin e-poçt ünvanı qeydə alınmayıb."}, status=400)
 
-        buf = _render_warranty_pdf(repair)
+        try:
+            buf = _render_warranty_pdf(repair)
+        except RuntimeError:
+            return Response({"detail": "PDF yaradıla bilmədi, mail göndərilmədi — serverdə texniki xəta."}, status=500)
 
         email = EmailMessage(
             subject=f"{repair.shop.name} — Zəmanət sənədi ({repair.number})",
@@ -138,8 +152,19 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
             to=[repair.customer.email],
             reply_to=[repair.shop.owner_email] if repair.shop.owner_email else None,
         )
-        email.attach(f"zemanet-{repair.number}.pdf", buf.getvalue(), "application/pdf")
-        email.send(fail_silently=False)
+        pdf_bytes = buf.getvalue()
+        email.attach(f"zemanet-{repair.number}.pdf", pdf_bytes, "application/pdf")
+        try:
+            email.send(fail_silently=False)
+        except Exception as exc:
+            # SMTP-nin özü rədd edəndə (autentifikasiya, limit, bağlantı və s.) bunu loglayırıq —
+            # beləcə server logunda konkret səbəb görünür, "mail getmədi" şikayətində server
+            # tərəfindən konkrit nə baş verdiyini araşdırmaq mümkün olur.
+            import logging
+            logging.getLogger("repairs").error(
+                "Zəmanət e-poçtu göndərilmədi (repair #%s, PDF %s bayt): %s", repair.pk, len(pdf_bytes), exc
+            )
+            return Response({"detail": "Mail göndərilmədi — server/SMTP xətası. Server loquna baxın."}, status=502)
         return Response({"detail": "Göndərildi."})
 
     @action(detail=False, methods=["get"], url_path="warranties")
@@ -165,8 +190,19 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="debts")
     def debts(self, request):
-        """'07 Borclar' səhifəsinin müştəri borcları hissəsi."""
-        qs = self.filter_queryset(self.get_queryset()).filter(payment_status=PaymentStatus.DEBT)
+        """
+        '07 Borclar' səhifəsinin müştəri borcları hissəsi.
+        DİQQƏT: əvvəllər bura yalnız `payment_status=DEBT` olan təmirlər düşürdü — həmin sahə isə
+        `recompute_payment_status()`-da YALNIZ status 'Təhvil verildi'-yə keçəndə 'debt' olur
+        (bax repairs/models.py). Nəticədə, məs. 'Hazırdır' statusunda duran, hələ təhvil
+        verilməmiş, qismən ödənilmiş bir təmirin qalıq borcu bu siyahıda HEÇ görünmürdü —
+        halbuki müştərinin kart səhifəsindəki ümumi borc (bax customers/serializers.py
+        get_total_debt) onu artıq hesaba qatırdı. İkisi fərqli nəticə göstərirdi deyə şikayət
+        gəldi. Ona görə filtri 'status=DEBT'dən 'qalıq borc > 0 və ləğv edilməyib'ə dəyişdik —
+        bu, get_total_debt ilə HƏM DƏ eyni məntiqdir.
+        """
+        qs = self.filter_queryset(self.get_queryset()).exclude(status=RepairStatus.CANCELLED)
+        qs = [r for r in qs if r.remaining_debt > 0]
         data = [{
             "id": r.id, "number": r.number,
             "customer_name": r.customer.full_name, "customer_initials": r.customer.initials,

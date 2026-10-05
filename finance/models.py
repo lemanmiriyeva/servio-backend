@@ -7,7 +7,9 @@ from suppliers.models import Supplier
 
 
 class TransactionType(models.TextChoices):
-    INCOME = "income", "Gəlir"
+    # Etiket "Gəlir"dən "Kassa"ya dəyişdirilib (frontend-dəki Kassa səhifəsi ilə uyğun olsun deyə) —
+    # bu, Django admin/Kapitan panelindəki seçim siyahısında görünən mətndir.
+    INCOME = "income", "Kassa"
     EXPENSE = "expense", "Xərc"
     SUPPLIER_PAYMENT = "supplier_payment", "Təchizatçı ödənişi"
     REFUND = "refund", "Geri qaytarma (zəmanət)"
