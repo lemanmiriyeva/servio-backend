@@ -1,5 +1,6 @@
 from decimal import Decimal
 from django.db.models import Sum
+from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status as http_status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -8,6 +9,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.throttling import ScopedRateThrottle
 
 from accounts.mixins import IsPlatformAdmin
+from accounts.models import DEFAULT_ROLE_MODULES, Module, Role, RolePermission
 from tenants.models import Shop
 from .models import SupportTicket, SubscriptionPayment
 from .serializers import SupportTicketSerializer, SubscriptionPaymentSerializer, ContactInquiryPublicSerializer
@@ -62,6 +64,67 @@ class PlatformDashboardView(APIView):
             "mrr": mrr,
             "open_tickets": SupportTicket.objects.filter(status=SupportTicket.Status.OPEN).count(),
         })
+
+
+class RoleModulesView(APIView):
+    """
+    GET /api/platform/role-modules/ — bütün modulların (açar + ad) siyahısı.
+    Kapitan panelindəki "Rollar" formunda icazə checkbox-larını çəkmək üçün — mağazanın öz
+    dashboard-undaki sabit MODULES siyahısı ilə sinxron qalsın deyə, backend-dəki vahid
+    `Module` mənbəsindən oxunur (iki yerdə əl ilə saxlanan siyahı asanlıqla yayınır).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response([
+            {"key": k, "label": l, "is_default": k in DEFAULT_ROLE_MODULES} for k, l in Module.choices
+        ])
+
+
+class RolePermissionsAdminView(APIView):
+    """
+    GET/PATCH /api/platform/roles/<id>/permissions/
+    `accounts.RoleViewSet`-in `/api/roles/<id>/permissions/` yolu YALNIZ rolun öz mağazasının
+    istifadəçisinə açıqdır (StrictShopScopedMixin) — Baş Admin Kapitan panelindən BAŞQA
+    mağazanın rolunu bu yoldan dəyişə bilmirdi (rol yaradılandan sonra hər modulu "Rol icazələri"
+    generic resursunda bir-bir əl ilə əlavə etməli olurdu). Bu görünüş Baş Adminə (və rolun öz
+    mağaza admininə) birbaşa, tək modalda icazələri idarə etmək imkanı verir.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _get_role(self, request, pk):
+        role = get_object_or_404(Role, pk=pk)
+        user = request.user
+        allowed = user.is_platform_admin or user.is_superuser or (
+            _is_shop_admin(user) and user.shop_id == role.shop_id
+        )
+        if not allowed:
+            raise PermissionDenied("Bu rola giriş icazəniz yoxdur.")
+        return role
+
+    def get(self, request, pk):
+        role = self._get_role(request, pk)
+        perms = {p.module: p.is_allowed for p in role.permissions.all()}
+        return Response([
+            {"module": k, "label": l, "is_allowed": role.is_owner_role or perms.get(k, False)}
+            for k, l in Module.choices
+        ])
+
+    def patch(self, request, pk):
+        role = self._get_role(request, pk)
+        if role.is_owner_role:
+            return Response({"detail": "Sahib rolunun icazələri dəyişdirilə bilməz."}, status=http_status.HTTP_400_BAD_REQUEST)
+        items = request.data.get("permissions", [])
+        valid_modules = set(Module.values)
+        for item in items:
+            module = item.get("module")
+            if module not in valid_modules:
+                continue
+            RolePermission.objects.update_or_create(
+                role=role, module=module, defaults={"is_allowed": bool(item.get("is_allowed"))},
+            )
+        perms = {p.module: p.is_allowed for p in role.permissions.all()}
+        return Response([{"module": k, "label": l, "is_allowed": perms.get(k, False)} for k, l in Module.choices])
 
 
 class PlatformResourcesView(APIView):
