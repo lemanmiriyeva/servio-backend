@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from accounts.mixins import ShopScopedQuerysetMixin, HasModulePermission
 from accounts.models import Module
-from .models import Supplier, SupplierPurchasePayment
+from .models import Supplier, SupplierPurchasePayment, sync_repair_cost_price
 from .serializers import SupplierSerializer
 
 
@@ -94,6 +94,8 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
             update_fields.append("amount")
         if update_fields:
             purchase.save(update_fields=update_fields)
+            if "amount" in update_fields and purchase.repair_id:
+                sync_repair_cost_price(purchase.repair)
         fresh = self.get_queryset().get(pk=supplier.pk)
         return Response(SupplierSerializer(fresh).data)
 
@@ -149,5 +151,7 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         purchase = s.save(shop=supplier.shop, supplier=supplier)
         if purchase.paid_amount:
             SupplierPurchasePayment.objects.create(purchase=purchase, amount=purchase.paid_amount, method="cash")
+        if purchase.repair_id:
+            sync_repair_cost_price(purchase.repair)
         fresh = self.get_queryset().get(pk=supplier.pk)
         return Response(SupplierSerializer(fresh).data, status=status.HTTP_201_CREATED)

@@ -187,12 +187,24 @@ class RepairStatusUpdateSerializer(serializers.Serializer):
         from django.utils import timezone
         repair: RepairOrder = self.context["repair"]
         new_status = self.validated_data["status"]
-        changed = new_status != repair.status
+        old_status = repair.status
+        changed = new_status != old_status
         repair.status = new_status
         if new_status == RepairStatus.DELIVERED and not repair.delivered_at:
             repair.delivered_at = timezone.now()
             repair.warranty_started_at = timezone.now().date()
         repair.save()
+        if changed and new_status == RepairStatus.CANCELLED:
+            # Təmir ləğv edilir — ona bağlı təchizatçı alışları da "ləğv edildi" kimi işarələnir
+            # (silinmir, tarixçədə qalır), ümumi təchizatçı borcundan isə çıxır.
+            from suppliers.models import PurchaseStatus
+            repair.supplier_purchases.update(status=PurchaseStatus.CANCELLED)
+        elif changed and old_status == RepairStatus.CANCELLED:
+            # Ləğv edilmiş təmir yenidən aktivləşdirilirsə, bağlı alışlar da geri aktivləşir
+            # və maya dəyəri yenidən onların cəminə görə hesablanır.
+            from suppliers.models import PurchaseStatus, sync_repair_cost_price
+            repair.supplier_purchases.filter(status=PurchaseStatus.CANCELLED).update(status=PurchaseStatus.ACTIVE)
+            sync_repair_cost_price(repair)
         if changed:
             # Hər status dəyişikliyinin vaxtı qeydə alınır ("nə vaxtdan təmir prosesindədir",
             # "nə vaxtdan hazırdır" və s. sualları üçün — bax RepairStatusHistory).

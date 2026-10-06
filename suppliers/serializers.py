@@ -11,6 +11,7 @@ class SupplierPurchasePaymentSerializer(serializers.ModelSerializer):
 
 class SupplierPurchaseSerializer(serializers.ModelSerializer):
     remaining = serializers.ReadOnlyField()
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
     repair = serializers.PrimaryKeyRelatedField(queryset=RepairOrder.objects.all(), required=False, allow_null=True)
     repair_number = serializers.CharField(source="repair.number", read_only=True, default=None)
     customer_name = serializers.CharField(source="repair.customer.full_name", read_only=True, default=None)
@@ -20,8 +21,9 @@ class SupplierPurchaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = SupplierPurchase
         fields = ["id", "description", "amount", "paid_amount", "remaining", "purchased_at",
+                  "status", "status_display",
                   "repair", "repair_number", "customer_name", "supplier", "supplier_name", "payments"]
-        read_only_fields = ["id", "supplier"]
+        read_only_fields = ["id", "supplier", "status"]
 
     def get_payments(self, obj):
         rows = list(obj.payments.all())

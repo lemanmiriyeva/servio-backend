@@ -3,6 +3,13 @@ from django.utils import timezone
 from tenants.models import Shop
 
 
+class PurchaseStatus(models.TextChoices):
+    ACTIVE = "active", "Aktiv"
+    # Alış bağlı olduğu təmir ləğv ediləndə avtomatik bura keçir — silinmir (tarixçə qalır),
+    # amma ümumi təchizatçı borcundan (total_debt) çıxarılır.
+    CANCELLED = "cancelled", "Ləğv edildi"
+
+
 class Supplier(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name="suppliers")
     name = models.CharField(max_length=150)
@@ -15,11 +22,12 @@ class Supplier(models.Model):
 
     @property
     def total_purchased(self):
-        return sum(p.amount for p in self.purchases.all())
+        # Ləğv edilmiş alışlar (bağlı təmir ləğv edilib) ümumi məbləğə daxil edilmir.
+        return sum(p.amount for p in self.purchases.exclude(status=PurchaseStatus.CANCELLED))
 
     @property
     def total_paid(self):
-        return sum(p.paid_amount for p in self.purchases.all())
+        return sum(p.paid_amount for p in self.purchases.exclude(status=PurchaseStatus.CANCELLED))
 
     @property
     def total_debt(self):
@@ -37,6 +45,7 @@ class SupplierPurchase(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     purchased_at = models.DateField(default=timezone.now)
+    status = models.CharField(max_length=20, choices=PurchaseStatus.choices, default=PurchaseStatus.ACTIVE)
     # Könüllü: alış hansı təmir üçün edilib (məs. Leman xanımın iPhone ekranı → iDoctor)
     repair = models.ForeignKey(
         "repairs.RepairOrder", on_delete=models.SET_NULL, null=True, blank=True,
@@ -70,3 +79,24 @@ class SupplierPurchasePayment(models.Model):
 
     def __str__(self):
         return f"{self.purchase} · {self.amount}"
+
+
+def sync_repair_cost_price(repair):
+    """
+    Bir təmirə bağlı təchizatçı alışı əlavə/redaktə/ləğv olunanda, həmin təmirin "maya dəyəri"
+    (cost_price) bağlı (ləğv edilməmiş) alışların cəminə görə yenilənir — əks halda alışı
+    dəyişəndə müştərinin mənfəəti köhnə rəqəmlə hesablanmağa davam edirdi.
+    Təmirin heç bir (aktiv) alışı yoxdursa toxunmuruq (cost_price əl ilə, birbaşa təmir
+    səhifəsindən də yazıla bilər — orda girilən qiyməti burdan sıfırlamamalıyıq).
+    """
+    from decimal import Decimal
+
+    if repair is None:
+        return
+    purchases = repair.supplier_purchases.exclude(status=PurchaseStatus.CANCELLED)
+    if not purchases.exists():
+        return
+    total = sum((p.amount for p in purchases), Decimal("0"))
+    if repair.cost_price != total:
+        repair.cost_price = total
+        repair.save(update_fields=["cost_price"])
