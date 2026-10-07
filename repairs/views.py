@@ -209,7 +209,11 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="warranties")
     def warranties(self, request):
         """'06 Zəmanətlər' səhifəsi — yalnız zəmanət başlamış (təhvil verilmiş) təmirlər."""
-        qs = self.filter_queryset(self.get_queryset()).exclude(warranty_started_at__isnull=True)
+        # Təhvil verilib sonra ləğv edilmiş təmir (warranty_started_at artıq doldurulub) bu
+        # siyahıdan çıxır — ləğv edilmiş xidmətə zəmanət şərti tətbiq olunmur.
+        qs = (self.filter_queryset(self.get_queryset())
+              .exclude(warranty_started_at__isnull=True)
+              .exclude(status=RepairStatus.CANCELLED))
         data = []
         for r in qs:
             data.append({

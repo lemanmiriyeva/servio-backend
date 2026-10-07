@@ -45,10 +45,11 @@ class DashboardView(APIView):
         )
         supplier_debt_total = sum((s.total_debt for s in Supplier.objects.filter(shop=shop)), Decimal("0"))
 
-        warranty_active = [r for r in repairs if r.warranty_days_left is not None and r.warranty_days_left >= 0]
+        warranty_active = [r for r in repairs if r.status != RepairStatus.CANCELLED
+                           and r.warranty_days_left is not None and r.warranty_days_left >= 0]
         warranty_ending_soon = [r for r in warranty_active if r.warranty_days_left <= 3]
 
-        overdue_repairs = repairs.filter(
+        overdue_repairs = repairs.exclude(status=RepairStatus.CANCELLED).filter(
             payment_status=PaymentStatus.DEBT, debt_due_date__lt=today
         ).count()
 

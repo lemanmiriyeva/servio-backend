@@ -94,6 +94,11 @@ class RepairOrder(models.Model):
 
     @property
     def remaining_debt(self):
+        # Ləğv edilmiş təmir artıq "borc" sayılmır — nə müştəri kartında, nə Borclar/Kassa/
+        # Dashboard-da görünməlidir. Status 'cancelled'-a keçəndə bu, 0 qayıdır, bu da aşağıdakı
+        # recompute_payment_status()-un onu avtomatik 'paid' (borcsuz) kimi işarələməsinə səbəb olur.
+        if self.status == RepairStatus.CANCELLED:
+            return 0
         return self.sale_price - self.paid_amount
 
     @property
