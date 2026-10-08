@@ -41,7 +41,13 @@ class DashboardView(APIView):
         today_refund = (CashTransaction.objects.filter(
             shop=shop, type=TransactionType.REFUND, created_at__date=today
         ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
-        today_income = today_income_gross - today_refund
+        # Köhnə (bu gün/bu ay daxil olmayan) bir satışın bu gün ləğv edilib geri
+        # qaytarılması, "bu günün gəliri"ni MƏNFİ göstərməməlidir — "bu gün -270 AZN
+        # gəlir" mənasız görünür (bu günün özündə heç bir satış olmaya bilər). Kassa
+        # səhifəsindəki ümumi, tarixsiz "Mədaxil" fərqli olaraq həmişə müsbətdir, çünki
+        # hər geri qaytarma özündən əvvəlki gəlirin bir hissəsini çıxır; burda isə
+        # pəncərə (gün/ay) ilə məhdudlaşdırıldığı üçün mənfiyə düşə bilər — 0-da saxlanılır.
+        today_income = max(today_income_gross - today_refund, Decimal("0"))
 
         month_income_gross = (CashTransaction.objects.filter(
             shop=shop, type=TransactionType.INCOME, created_at__date__gte=month_start
@@ -49,7 +55,7 @@ class DashboardView(APIView):
         month_refund = (CashTransaction.objects.filter(
             shop=shop, type=TransactionType.REFUND, created_at__date__gte=month_start
         ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
-        month_income = month_income_gross - month_refund
+        month_income = max(month_income_gross - month_refund, Decimal("0"))
 
         customer_debt_total = sum(
             (r.remaining_debt for r in repairs.filter(payment_status=PaymentStatus.DEBT)), Decimal("0")
