@@ -34,7 +34,10 @@ class MarketplaceOrderSerializer(serializers.ModelSerializer):
             "related_repair", "created_at", "responded_at", "paid_at", "completed_at",
         ]
         read_only_fields = [
-            "id", "seller_shop", "unit_price", "status", "seller_note",
+            # buyer_shop create()-də request.user.shop-dan avtomatik təyin olunur —
+            # frontend bunu göndərmir, ona görə məcburi sahə kimi saxlanılsa DRF
+            # "bu sahə mütləqdir" deyib 400 qaytarır (bax: "Sifariş ver" düyməsi xətası).
+            "id", "buyer_shop", "seller_shop", "unit_price", "status", "seller_note",
             "created_at", "responded_at", "paid_at", "completed_at",
         ]
 

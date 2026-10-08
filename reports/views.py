@@ -125,9 +125,14 @@ class ReportsSummaryView(APIView):
             shop=shop, type=TransactionType.EXPENSE, created_at__date__gte=start, created_at__date__lte=end
         ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
 
+        # Xidmət ləğv edilib geri qaytarılan məbləğ xalis mənfəətdən çıxılmamalıdır —
+        # bu xidmətin satışı (sale_price) artıq total_sales-a daxil deyil (yuxarıdakı
+        # .exclude(status=CANCELLED)), ona görə onun geri qaytarmasını bir də mənfəətdən
+        # çıxsaq, heç olmayan "gəliri" iki dəfə mənfi hesablamış olarıq. Yalnız real
+        # zəmanət qaytarması (aktiv/tamamlanmış təmirə bağlı) mənfəəti azaltmalıdır.
         refunds = (CashTransaction.objects.filter(
             shop=shop, type=TransactionType.REFUND, created_at__date__gte=start, created_at__date__lte=end
-        ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+        ).exclude(repair__status=RepairStatus.CANCELLED).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
 
         customer_debt = sum((r.remaining_debt for r in RepairOrder.objects.filter(
             shop=shop, payment_status=PaymentStatus.DEBT)), Decimal("0"))
