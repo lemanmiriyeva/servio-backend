@@ -34,6 +34,10 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
             return Response({"detail": "Məbləğ sıfırdan böyük olmalıdır."}, status=status.HTTP_400_BAD_REQUEST)
 
         method = request.data.get("method", "cash")
+        # Kassada bu qədər pul yoxdursa, ödənişi qeydə almadan dayandırırıq —
+        # "Kassada vəsait yoxdur" (bax: assert_sufficient_balance).
+        from finance.models import assert_sufficient_balance
+        assert_sufficient_balance(supplier.shop, amount)
         remaining_to_apply = amount
         for purchase in supplier.purchases.filter(paid_amount__lt=models.F("amount")).order_by("purchased_at"):
             if remaining_to_apply <= 0:
@@ -148,9 +152,28 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
             return Response({"detail": "Bu təmir sizin mağazaya aid deyil."}, status=status.HTTP_400_BAD_REQUEST)
         if s.validated_data.get("paid_amount", 0) > s.validated_data["amount"]:
             return Response({"detail": "Ödənilən məbləğ alış məbləğindən çox ola bilməz."}, status=status.HTTP_400_BAD_REQUEST)
+        upfront_paid = s.validated_data.get("paid_amount") or 0
+        if upfront_paid:
+            # Alışla BİRLİKDƏ dərhal ödəniş edilirsə (məs. "iDoctor-dan nağdsız aldım,
+            # borcsuz"), kassada bu qədər pul yoxdursa alışın özü də yaradılmır —
+            # əks halda alış qeydə düşər, amma ödəniş heç cür qeydə alınmaz.
+            from finance.models import assert_sufficient_balance
+            assert_sufficient_balance(supplier.shop, upfront_paid)
         purchase = s.save(shop=supplier.shop, supplier=supplier)
         if purchase.paid_amount:
             SupplierPurchasePayment.objects.create(purchase=purchase, amount=purchase.paid_amount, method="cash")
+            # BUG: burda əvvəllər yalnız SupplierPurchasePayment (alışın öz tarixçəsi) yaradılırdı,
+            # amma Kassaya "Təchizatçı ödənişi" XƏRC qeydi yazılmırdı — halbuki `pay()` əməliyyatı
+            # bunu edir. Nəticədə alış zamanı ödənilən pul (məs. iDoctor-a nağd/köçürmə ilə dərhal
+            # ödənilən, yaxud Eyşan Usta kimi xarici ustaya verilən məbləğ) nə Kassa balansından
+            # düşür, nə "Xərc" kimi hesabatda görünürdü — sanki itirdi/mənfəət kimi qalırdı.
+            from finance.models import CashTransaction, TransactionType
+            CashTransaction.objects.create(
+                shop=supplier.shop, branch=getattr(request.user, "branch", None),
+                type=TransactionType.SUPPLIER_PAYMENT, amount=purchase.paid_amount, method="cash",
+                description=f"{supplier.name} — {purchase.description}",
+                supplier=supplier, repair=purchase.repair, created_by=request.user,
+            )
         if purchase.repair_id:
             sync_repair_cost_price(purchase.repair)
         fresh = self.get_queryset().get(pk=supplier.pk)

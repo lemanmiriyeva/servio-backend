@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import CashTransaction
+from .models import CashTransaction, TransactionType, assert_sufficient_balance
 
 
 class CashTransactionSerializer(serializers.ModelSerializer):
@@ -16,7 +16,12 @@ class CashTransactionSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         request = self.context["request"]
-        validated_data["shop"] = request.user.shop
+        shop = request.user.shop
+        # Əl ilə "Xərc" əlavə edəndə kassada kifayət qədər pul yoxdursa, əməliyyat
+        # rədd edilir — balans sakitcə mənfiyə düşmür (bax: assert_sufficient_balance).
+        if validated_data.get("type") == TransactionType.EXPENSE:
+            assert_sufficient_balance(shop, validated_data["amount"])
+        validated_data["shop"] = shop
         validated_data["branch"] = request.user.branch
         validated_data["created_by"] = request.user
         return super().create(validated_data)

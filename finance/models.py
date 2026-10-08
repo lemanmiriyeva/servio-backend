@@ -80,3 +80,23 @@ def compute_cashbox_summary(shop):
         "refund": refund,
         "current_balance": opening_amount + income - expense - supplier_payment - refund,
     }
+
+
+def assert_sufficient_balance(shop, amount):
+    """
+    Kassadan pul çıxan hər əməliyyatdan (xərc, təchizatçı ödənişi) əvvəl çağırılır —
+    balans kifayət deyilsə ValidationError qaldırır ki, kassa mənfiyə düşməsin və
+    istifadəçi "Kassada vəsait yoxdur" mesajını görsün (əvvəllər bu yoxlama heç yerdə
+    yox idi, əməliyyat hər zaman keçirdi və balans sakitcə mənfiyə enirdi).
+    """
+    from rest_framework.exceptions import ValidationError
+
+    current = compute_cashbox_summary(shop)["current_balance"]
+    if amount > current:
+        # {"detail": ...} şəklində qaldırılır — kodun qalan hissəsində bu format
+        # istifadə olunur (bax: repairs/[id]/page.tsx-də err.data.detail yoxlaması),
+        # sadə mətn versə DRF onu massiv kimi qaytarır və frontend-dəki bu format
+        # gözləyən yerlər mesajı tapa bilmir.
+        raise ValidationError({
+            "detail": f"Kassada vəsait yoxdur — cari balans {current} AZN, bu əməliyyat {amount} AZN tələb edir."
+        })
