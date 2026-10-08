@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from customers.models import Customer
 from customers.serializers import CustomerSerializer
-from suppliers.models import SupplierPurchase
+from suppliers.models import SupplierPurchase, PurchaseStatus
 from .models import (
     RepairOrder, RepairPayment, RepairStatus, RepairStatusHistory, RepairWarrantyReturn, SupplierReturnStatus,
 )
@@ -168,7 +168,12 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
     def get_supplier_purchases(self, obj):
         return [
             {"id": p.id, "supplier": p.supplier.name, "description": p.description,
-             "amount": p.amount, "paid_amount": p.paid_amount, "remaining": p.remaining}
+             "amount": p.amount, "paid_amount": p.paid_amount,
+             # Ləğv edilmiş alış üçün "qalıq borc" artıq göstərilmir (0) — təmir ləğv
+             # ediləndə bu alış da ləğv olunur və ümumi təchizatçı borcundan çıxır
+             # (bax Supplier.total_debt), ona görə burda da borc kimi görünməməlidir.
+             "remaining": 0 if p.status == PurchaseStatus.CANCELLED else p.remaining,
+             "status": p.status, "status_display": p.get_status_display()}
             for p in obj.supplier_purchases.select_related("supplier").all()
         ]
 
