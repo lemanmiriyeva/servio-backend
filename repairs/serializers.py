@@ -199,6 +199,25 @@ class RepairStatusUpdateSerializer(serializers.Serializer):
             # (silinmir, tarixçədə qalır), ümumi təchizatçı borcundan isə çıxır.
             from suppliers.models import PurchaseStatus
             repair.supplier_purchases.update(status=PurchaseStatus.CANCELLED)
+            # Bu təmirə görə müştəridən artıq real pul alınıbsa (kassaya "Kassa"/gəlir kimi
+            # düşübsə), ləğv edəndə onu silmirik (maliyyə tarixçəsi qorunur), əvəzinə eyni
+            # məbləğdə "Geri qaytarma" qeydi əlavə edirik ki, Kassa balansı özü-özünə düzəlsin —
+            # müştəri "ləğv etdim, amma kassada qalır" şikayəti elə bunun üçün idi.
+            from finance.models import CashTransaction, TransactionType
+            net_received = sum(
+                (t.amount if t.type == TransactionType.INCOME else -t.amount)
+                for t in CashTransaction.objects.filter(
+                    repair=repair, type__in=[TransactionType.INCOME, TransactionType.REFUND]
+                )
+            )
+            if net_received > 0:
+                request = self.context.get("request")
+                CashTransaction.objects.create(
+                    shop=repair.shop, branch=repair.branch, type=TransactionType.REFUND,
+                    amount=net_received, method="cash",
+                    description=f"{repair.number}, {repair.customer.full_name} — xidmət ləğv edildi, ödəniş geri qaytarıldı",
+                    repair=repair, created_by=getattr(request, "user", None),
+                )
         elif changed and old_status == RepairStatus.CANCELLED:
             # Ləğv edilmiş təmir yenidən aktivləşdirilirsə, bağlı alışlar da geri aktivləşir
             # və maya dəyəri yenidən onların cəminə görə hesablanır.

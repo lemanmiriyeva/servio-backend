@@ -117,7 +117,7 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="status")
     def set_status(self, request, pk=None):
         repair = self.get_object()
-        s = RepairStatusUpdateSerializer(data=request.data, context={"repair": repair})
+        s = RepairStatusUpdateSerializer(data=request.data, context={"repair": repair, "request": request})
         s.is_valid(raise_exception=True)
         s.save()
         return Response(RepairOrderDetailSerializer(repair).data)
