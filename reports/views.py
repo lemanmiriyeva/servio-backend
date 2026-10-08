@@ -32,13 +32,24 @@ class DashboardView(APIView):
         active_statuses = [RepairStatus.RECEIVED, RepairStatus.DIAGNOSING,
                             RepairStatus.WAITING_REPAIR, RepairStatus.IN_PROGRESS]
 
-        today_income = (CashTransaction.objects.filter(
+        # Kassa səhifəsindəki "Mədaxil" ilə EYNİ məntiq: bir xidmət ləğv edilib pulu geri
+        # qaytarılırsa, bu, "bu günün/ayın gəliri"ndən də çıxılmalıdır — əks halda ləğv
+        # edəndən sonra bu rəqəm "dəyişmir" təəssüratı yaradır (məhz bu şikayət idi).
+        today_income_gross = (CashTransaction.objects.filter(
             shop=shop, type=TransactionType.INCOME, created_at__date=today
         ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+        today_refund = (CashTransaction.objects.filter(
+            shop=shop, type=TransactionType.REFUND, created_at__date=today
+        ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+        today_income = today_income_gross - today_refund
 
-        month_income = (CashTransaction.objects.filter(
+        month_income_gross = (CashTransaction.objects.filter(
             shop=shop, type=TransactionType.INCOME, created_at__date__gte=month_start
         ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+        month_refund = (CashTransaction.objects.filter(
+            shop=shop, type=TransactionType.REFUND, created_at__date__gte=month_start
+        ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+        month_income = month_income_gross - month_refund
 
         customer_debt_total = sum(
             (r.remaining_debt for r in repairs.filter(payment_status=PaymentStatus.DEBT)), Decimal("0")

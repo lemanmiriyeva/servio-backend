@@ -125,6 +125,16 @@ class MarketplaceOrder(models.Model):
                 amount=self.total_price, method=self.payment_method,
                 description=f"Marketplace satış — {self.product.name} x{self.quantity} ({self.buyer_shop.name})",
             )
+            # Əvvəllər yalnız satıcının kassasına gəlir yazılırdı — alıcının bu pulu
+            # haradan ödədiyi heç yerdə görünmürdü (nə Kassa, nə Hesabat). İndi alıcının
+            # öz mağazasında eyni məbləğ XƏRC kimi qeydə alınır ki, hər iki tərəfin
+            # kassası/hesabatı düzgün əks olunsun.
+            CashTransaction.objects.create(
+                shop=self.buyer_shop, branch=self.buyer_branch, type=TransactionType.EXPENSE,
+                amount=self.total_price, method=self.payment_method,
+                expense_category="Marketplace alışı",
+                description=f"Marketplace alış — {self.product.name} x{self.quantity} ({self.seller_shop.name})",
+            )
             self.status = OrderStatus.PAID
             self.paid_at = timezone.now()
             self.save(update_fields=["status", "paid_at"])
