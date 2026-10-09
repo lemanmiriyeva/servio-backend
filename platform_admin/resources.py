@@ -149,7 +149,7 @@ RESOURCES = [
 
     # -- Planlar və Abunələr: sırf Baş Admin ilə bağlı, mağazaların özünə aid olmayan bölmə --
     Resource("plans", "tenants.Plan", "Planlar", PLANS_GROUP,
-             ["name", "price_monthly", "max_branches", "max_users", "is_featured", "show_on_pricing_page"],
+             ["name", "price_monthly", "price_yearly", "max_branches", "max_users", "is_featured", "show_on_pricing_page"],
              section=SEC_PLANS),
     Resource("payments", "platform_admin.SubscriptionPayment", "Abunə ödənişləri", PLANS_GROUP,
              ["shop", "amount", "period_start", "period_end", "paid_at"], section=SEC_PLANS),
@@ -229,7 +229,9 @@ FIELD_LABELS = {
     "logo_initials": "Loqo hərfləri", "work_hours": "İş saatları", "tax_id": "VÖEN",
     "receipt_terms": "Qəbz şərtləri", "trial_ends_at": "Sınaq bitmə tarixi", "next_payment_at": "Növbəti ödəniş",
     "default_warranty_days": "Standart zəmanət (gün)", "currency": "Valyuta", "is_active": "Aktivdir",
-    "price_monthly": "Aylıq qiymət", "max_branches": "Maks. filial", "max_users": "Maks. istifadəçi",
+    "price_monthly": "Aylıq qiymət", "price_yearly": "İllik qiymət",
+    "public_description_yearly": "İllik seçim izahı (Qiymətlər səhifəsində)",
+    "max_branches": "Maks. filial", "max_users": "Maks. istifadəçi",
     "is_main": "Əsas filial", "is_owner_role": "Sahib rolu", "module": "Modul", "is_allowed": "İcazə verilib",
     "username": "İstifadəçi adı (giriş üçün)", "first_name": "Ad", "last_name": "Soyad", "password": "Şifrə",
     "is_platform_admin": "Platforma Super Admini (BÜTÜN mağazaları görür!)",
