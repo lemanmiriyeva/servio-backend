@@ -54,8 +54,8 @@ class PublicPlanSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Plan
-        fields = ["id", "name", "price_monthly", "max_branches", "max_users",
-                  "public_description", "features", "is_featured"]
+        fields = ["id", "name", "price_monthly", "price_yearly", "max_branches", "max_users",
+                  "public_description", "public_description_yearly", "features", "is_featured"]
 
     def get_features(self, obj):
         return obj.public_features_list()

@@ -182,7 +182,24 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
         validated_data["shop"] = request.user.shop
         validated_data["branch"] = request.user.branch
         validated_data["created_by"] = request.user
-        return super().create(validated_data)
+        repair = super().create(validated_data)
+        # Cihaz xarici ustaya göndərilibsə (technician_name doldurulub) və ustaya verilən
+        # məbləğ (cost_price) qeyd olunubsa — bu, təchizatçı siyahısından seçilən bir
+        # "Supplier" deyil, sadəcə ad yazılan xarici usta olduğu üçün heç vaxt Kassadan
+        # məxaric kimi düşmürdü (yalnız profit = sale_price - cost_price hesablamasında
+        # görünürdü, real pul Kassada "qalırdı" kimi göstərilirdi). İndi bu məbləği birbaşa
+        # Kassadan xərc kimi yazırıq ki, balans da real vəziyyəti göstərsin.
+        if repair.technician_name and repair.cost_price and repair.cost_price > 0:
+            from finance.models import CashTransaction, TransactionType, assert_sufficient_balance
+            assert_sufficient_balance(repair.shop, repair.cost_price)
+            CashTransaction.objects.create(
+                shop=repair.shop, branch=repair.branch, type=TransactionType.EXPENSE,
+                amount=repair.cost_price, method="cash",
+                expense_category="Xarici usta ödənişi",
+                description=f"{repair.number}, {repair.customer.full_name} — ustaya ({repair.technician_name}) ödənildi",
+                repair=repair, created_by=request.user,
+            )
+        return repair
 
 
 class RepairStatusUpdateSerializer(serializers.Serializer):

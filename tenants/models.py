@@ -9,12 +9,20 @@ class Plan(models.Model):
     səhifəsi üçün istifadə olunur (public_* sahələri marketinq göstərimi üçündür)."""
     name = models.CharField(max_length=50, unique=True)
     price_monthly = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    price_yearly = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="İllik ödəniş seçimi (AZN). Boş saxlansa, Qiymətlər səhifəsində illik seçim göstərilmir.",
+    )
     max_branches = models.PositiveIntegerField(default=1)
     max_users = models.PositiveIntegerField(default=3)
 
     # --- İctimai "Qiymətlər" səhifəsi üçün (Baş Admin idarə edir) ---
     public_description = models.CharField(max_length=200, blank=True,
                                             help_text="Qiymətlər səhifəsində planın altındakı qısa izah")
+    public_description_yearly = models.CharField(
+        max_length=200, blank=True,
+        help_text="İllik ödəniş seçimi göstəriləndə onun altında görünən qısa izah (məs. '2 ay pulsuz').",
+    )
     public_features = models.TextField(blank=True, help_text="Hər sətirdə bir üstünlük")
     is_featured = models.BooleanField(default=False, help_text="\"Ən populyar\" kimi vurğulanır")
     show_on_pricing_page = models.BooleanField(default=True)

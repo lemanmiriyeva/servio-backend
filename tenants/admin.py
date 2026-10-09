@@ -4,7 +4,7 @@ from .models import Plan, Shop, Branch
 
 @admin.register(Plan)
 class PlanAdmin(admin.ModelAdmin):
-    list_display = ("name", "price_monthly", "max_branches", "max_users")
+    list_display = ("name", "price_monthly", "price_yearly", "max_branches", "max_users")
     search_fields = ("name",)
 
 
