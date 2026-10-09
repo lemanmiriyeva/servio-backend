@@ -34,6 +34,16 @@ if not DEBUG and SECRET_KEY.startswith("django-insecure-"):
     )
 
 ALLOWED_HOSTS = env("DJANGO_ALLOWED_HOSTS") or (["*"] if DEBUG else [])
+# Konteynerlər-arası (server-tərəfli) sorğular — məs. frontend-in Next.js SSR kodu
+# Qiymətlər/Ana səhifə kimi səhifələri render edərkən birbaşa Docker şəbəkəsi üzərindən
+# "http://servio-backend:8000/..." kimi bir ünvana müraciət edir, nginx-dən (public domen
+# Host başlığı ilə) keçmir. DJANGO_ALLOWED_HOSTS adətən yalnız ictimai domeni (servio.az)
+# ehtiva etdiyi üçün bu daxili sorğular Host başlığı uyğun gəlmədiyinə görə 400 Bad Request
+# alırdı — nəticədə SSR fetch-i səssizcə uğursuz olur, səhifələr bazadan data gəlmədən boş
+# görünürdü. Bu adlar DEBUG=False olanda belə, env-də nə yazılıb-yazılmayıbdan asılı
+# olmayaraq HƏMİŞƏ əlavə olunur ki, bu problem bir daha təkrarlanmasın.
+if not DEBUG:
+    ALLOWED_HOSTS = list(ALLOWED_HOSTS) + ["servio-backend", "backend", "localhost", "127.0.0.1"]
 
 INSTALLED_APPS = [
     "jazzmin",  # django.contrib.admin-dən ƏVVƏL olmalıdır
