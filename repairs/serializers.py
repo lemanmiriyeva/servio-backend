@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import serializers
 from customers.models import Customer
 from customers.serializers import CustomerSerializer
@@ -192,8 +193,15 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
         if repair.technician_name and repair.cost_price and repair.cost_price > 0:
             from finance.models import CashTransaction, TransactionType, assert_sufficient_balance
             assert_sufficient_balance(repair.shop, repair.cost_price)
+            # DİQQƏT: type=SUPPLIER_PAYMENT (EXPENSE YOX) — bu məbləğ artıq repair.cost_price-ın
+            # (maya dəyəri) özüdür və Hesabatlarda "total_cost" buradan hesablanır. Əgər bunu
+            # EXPENSE kimi yazsaq, Hesabatlardakı "xərclər" sətri bu məbləği BİR DƏ çıxarar —
+            # eyni 100 AZN həm maya dəyərində, həm də "xərc"də görünüb xalis mənfəəti iki dəfə
+            # azaldardı. SUPPLIER_PAYMENT, təchizatçıya edilən bütün ödənişlərlə eyni kateqoriyada
+            # olduğu üçün (bax: suppliers/views.py) Kassa balansına təsiri eynidir, amma Hesabat
+            # mənfəət hesablamasına (yalnız EXPENSE-i çıxan) ikinci dəfə daxil olmur.
             CashTransaction.objects.create(
-                shop=repair.shop, branch=repair.branch, type=TransactionType.EXPENSE,
+                shop=repair.shop, branch=repair.branch, type=TransactionType.SUPPLIER_PAYMENT,
                 amount=repair.cost_price, method="cash",
                 expense_category="Xarici usta ödənişi",
                 description=f"{repair.number}, {repair.customer.full_name} — ustaya ({repair.technician_name}) ödənildi",
@@ -238,6 +246,30 @@ class RepairStatusUpdateSerializer(serializers.Serializer):
                     shop=repair.shop, branch=repair.branch, type=TransactionType.REFUND,
                     amount=net_received, method="cash",
                     description=f"{repair.number}, {repair.customer.full_name} — xidmət ləğv edildi, ödəniş geri qaytarıldı",
+                    repair=repair, created_by=getattr(request, "user", None),
+                )
+            # Bu təmirə görə artıq təchizatçıya/xarici ustaya ödənilmiş məbləğ varsa (birbaşa
+            # usta ödənişi və ya alış zamanı "dərhal ödənildi" seçimi ilə), müştəri qeyd etdi ki,
+            # xidmət ləğv olunanda kassa mənfiyə düşməməlidir — yəni bu pul da geri alınmış sayılır
+            # (usta/təchizatçıdan geri tələb olunur). Ona görə eyni məbləğdə EXPENSE_REFUND yazırıq
+            # ki, kassa balansı bu əməliyyatdan əvvəlki vəziyyətinə tam qayıtsın.
+            paid_out = sum(
+                (t.amount for t in CashTransaction.objects.filter(
+                    repair=repair, type__in=[TransactionType.SUPPLIER_PAYMENT, TransactionType.EXPENSE]
+                )), Decimal("0"),
+            )
+            already_recovered = sum(
+                (t.amount for t in CashTransaction.objects.filter(
+                    repair=repair, type=TransactionType.EXPENSE_REFUND
+                )), Decimal("0"),
+            )
+            to_recover = paid_out - already_recovered
+            if to_recover > 0:
+                request = self.context.get("request")
+                CashTransaction.objects.create(
+                    shop=repair.shop, branch=repair.branch, type=TransactionType.EXPENSE_REFUND,
+                    amount=to_recover, method="cash",
+                    description=f"{repair.number}, {repair.customer.full_name} — xidmət ləğv edildi, təchizatçı/ustaya ödənilən məbləğ geri alındı",
                     repair=repair, created_by=getattr(request, "user", None),
                 )
         elif changed and old_status == RepairStatus.CANCELLED:

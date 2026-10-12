@@ -13,6 +13,9 @@ class TransactionType(models.TextChoices):
     EXPENSE = "expense", "Xərc"
     SUPPLIER_PAYMENT = "supplier_payment", "Təchizatçı ödənişi"
     REFUND = "refund", "Geri qaytarma (zəmanət)"
+    # Xidmət ləğv edilən an, ona bağlı təchizatçı/usta ödənişi (SUPPLIER_PAYMENT) geri
+    # alınır — sistem özü yaradır, əl ilə seçilmir (bax: repairs/serializers.py CANCELLED).
+    EXPENSE_REFUND = "expense_refund", "Alışın geri qaytarılması (ləğv)"
 
 
 class CashTransaction(models.Model):
@@ -60,17 +63,34 @@ def compute_cashbox_summary(shop):
     Kassa səhifəsi VƏ ana səhifə eyni bu funksiyadan istifadə edir ki, 'kassa balansı'
     hər yerdə EYNİ (xərc/təchizatçı ödənişi düşülmüş) rəqəm olsun — ikisi arasında
     fərqli hesablama/sinxronsuzluq yaranmasın.
+
+    "Kassa balansı" YALNIZ NAĞD (method="cash") əməliyyatları əhatə edir — kartla/bank
+    köçürməsi ilə qəbul edilən pul fiziki kassada deyil (bankdadır), ona görə kartla
+    ödəniş qəbul ediləndə "kassada bu qədər nağd pul var" rəqəmi süni şəkildə artmamalıdır
+    (müştərinin konkret şikayəti elə bu idi: "kart seçəndə kassanın məbləğini qaldırır").
+    Kartla/bankla olan hərəkətlər ayrıca "card_balance" olaraq hesablanır — ümumi
+    gəlir/hesabat rəqəmlərinə (reports/views.py-dakı total_sales və s.) TƏSİR ETMİR,
+    çünki onlar bu funksiyadan deyil, RepairOrder.sale_price-dan hesablanır.
     """
     from decimal import Decimal
 
     opening = CashboxOpeningBalance.objects.filter(shop=shop).order_by("-as_of_date").first()
     opening_amount = opening.amount if opening else Decimal("0")
 
-    qs = CashTransaction.objects.filter(shop=shop)
-    income = sum((t.amount for t in qs.filter(type=TransactionType.INCOME)), Decimal("0"))
-    expense = sum((t.amount for t in qs.filter(type=TransactionType.EXPENSE)), Decimal("0"))
-    supplier_payment = sum((t.amount for t in qs.filter(type=TransactionType.SUPPLIER_PAYMENT)), Decimal("0"))
-    refund = sum((t.amount for t in qs.filter(type=TransactionType.REFUND)), Decimal("0"))
+    def totals(qs):
+        income = sum((t.amount for t in qs.filter(type=TransactionType.INCOME)), Decimal("0"))
+        expense = sum((t.amount for t in qs.filter(type=TransactionType.EXPENSE)), Decimal("0"))
+        supplier_payment = sum((t.amount for t in qs.filter(type=TransactionType.SUPPLIER_PAYMENT)), Decimal("0"))
+        refund = sum((t.amount for t in qs.filter(type=TransactionType.REFUND)), Decimal("0"))
+        expense_refund = sum((t.amount for t in qs.filter(type=TransactionType.EXPENSE_REFUND)), Decimal("0"))
+        return income, expense, supplier_payment, refund, expense_refund
+
+    all_qs = CashTransaction.objects.filter(shop=shop)
+    cash_qs = all_qs.filter(method=PaymentMethod.CASH)
+    card_qs = all_qs.exclude(method=PaymentMethod.CASH)
+
+    income, expense, supplier_payment, refund, expense_refund = totals(cash_qs)
+    card_income, card_expense, card_supplier_payment, card_refund, card_expense_refund = totals(card_qs)
 
     return {
         "opening_balance": opening_amount,
@@ -78,7 +98,11 @@ def compute_cashbox_summary(shop):
         "expense": expense,
         "supplier_payment": supplier_payment,
         "refund": refund,
-        "current_balance": opening_amount + income - expense - supplier_payment - refund,
+        "expense_refund": expense_refund,
+        "current_balance": opening_amount + income - expense - supplier_payment - refund + expense_refund,
+        # Kartla/bank köçürməsi ilə olan NET hərəkət (nə qədər kartla qəbul edilib, nə qədər
+        # kartla xərclənib) — məlumat üçün, "Kassa balansı"na daxil edilmir.
+        "card_balance": card_income - card_expense - card_supplier_payment - card_refund + card_expense_refund,
     }
 
 
