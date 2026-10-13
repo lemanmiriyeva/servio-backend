@@ -41,7 +41,15 @@ class CashTransaction(models.Model):
 
     @property
     def signed_amount(self):
-        return self.amount if self.type == TransactionType.INCOME else -self.amount
+        # DİQQƏT (mənfi işarələr): kassaya pul ƏLAVƏ edən əməliyyatlar (+), kassadan pul
+        # ÇIXARAN əməliyyatlar (-) olmalıdır. Əvvəllər yalnız INCOME "+" sayılırdı, qalan
+        # HAMISI "-" sayılırdı — amma EXPENSE_REFUND (ləğv zamanı alışın geri qaytarılması)
+        # əslində kassaya pul qaytarır, çıxarmır (bax: compute_cashbox_summary-də "+ expense_refund").
+        # Köhnə kod bunu səhvən mənfi göstərirdi, "signed_amount" istifadə olunan hər yerdə
+        # (məs. hesabat/export) yanlış mənfi işarə yaradırdı.
+        if self.type in (TransactionType.INCOME, TransactionType.EXPENSE_REFUND):
+            return self.amount
+        return -self.amount
 
     def __str__(self):
         return f"{self.get_type_display()} · {self.amount}"
