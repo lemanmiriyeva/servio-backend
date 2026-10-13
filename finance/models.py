@@ -106,21 +106,33 @@ def compute_cashbox_summary(shop):
     }
 
 
-def assert_sufficient_balance(shop, amount):
+def assert_sufficient_balance(shop, amount, method=PaymentMethod.CASH):
     """
-    Kassadan pul çıxan hər əməliyyatdan (xərc, təchizatçı ödənişi) əvvəl çağırılır —
-    balans kifayət deyilsə ValidationError qaldırır ki, kassa mənfiyə düşməsin və
-    istifadəçi "Kassada vəsait yoxdur" mesajını görsün (əvvəllər bu yoxlama heç yerdə
-    yox idi, əməliyyat hər zaman keçirdi və balans sakitcə mənfiyə enirdi).
+    Kassadan/kartdan pul çıxan hər əməliyyatdan (xərc, təchizatçı ödənişi) əvvəl çağırılır —
+    balans kifayət deyilsə ValidationError qaldırır ki, balans mənfiyə düşməsin və
+    istifadəçi "Kassada/Kartda vəsait yoxdur" mesajını görsün.
+
+    DİQQƏT: `method` MÜTLƏQ ötürülməlidir — əvvəllər bu funksiya həmişə YALNIZ nağd
+    balansını (current_balance) yoxlayırdı, "method" parametri heç olmayıb. Nəticədə
+    kartla/bank köçürməsi ilə edilən xərc/ödəniş (məs. "Xərc" səhifəsində üsul=Kart
+    seçəndə) səhvən nağd balansı ilə müqayisə olunurdu — nağd balans az olanda kartla
+    ödəniş səbəbsiz rədd edilir, YA DA nağd balans kifayət olanda kart balansı həqiqətən
+    kifayət etməsə belə əməliyyat keçib kart balansını mənfiyə salırdı.
     """
     from rest_framework.exceptions import ValidationError
 
-    current = compute_cashbox_summary(shop)["current_balance"]
+    summary = compute_cashbox_summary(shop)
+    if method == PaymentMethod.CASH:
+        current = summary["current_balance"]
+        label = "Kassada"
+    else:
+        current = summary["card_balance"]
+        label = "Kart/bank balansında"
     if amount > current:
         # {"detail": ...} şəklində qaldırılır — kodun qalan hissəsində bu format
         # istifadə olunur (bax: repairs/[id]/page.tsx-də err.data.detail yoxlaması),
         # sadə mətn versə DRF onu massiv kimi qaytarır və frontend-dəki bu format
         # gözləyən yerlər mesajı tapa bilmir.
         raise ValidationError({
-            "detail": f"Kassada vəsait yoxdur — cari balans {current} AZN, bu əməliyyat {amount} AZN tələb edir."
+            "detail": f"{label} vəsait yoxdur — cari balans {current} AZN, bu əməliyyat {amount} AZN tələb edir."
         })

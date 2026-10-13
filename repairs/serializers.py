@@ -192,7 +192,7 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
         # Kassadan xərc kimi yazırıq ki, balans da real vəziyyəti göstərsin.
         if repair.technician_name and repair.cost_price and repair.cost_price > 0:
             from finance.models import CashTransaction, TransactionType, assert_sufficient_balance
-            assert_sufficient_balance(repair.shop, repair.cost_price)
+            assert_sufficient_balance(repair.shop, repair.cost_price, "cash")
             # DİQQƏT: type=SUPPLIER_PAYMENT (EXPENSE YOX) — bu məbləğ artıq repair.cost_price-ın
             # (maya dəyəri) özüdür və Hesabatlarda "total_cost" buradan hesablanır. Əgər bunu
             # EXPENSE kimi yazsaq, Hesabatlardakı "xərclər" sətri bu məbləği BİR DƏ çıxarar —
@@ -238,60 +238,75 @@ class RepairStatusUpdateSerializer(serializers.Serializer):
                 # düşübsə), ləğv edəndə onu silmirik (maliyyə tarixçəsi qorunur), əvəzinə eyni
                 # məbləğdə "Geri qaytarma" qeydi əlavə edirik ki, Kassa balansı özü-özünə düzəlsin —
                 # müştəri "ləğv etdim, amma kassada qalır" şikayəti elə bunun üçün idi.
+                from collections import defaultdict
                 from finance.models import CashTransaction, TransactionType, compute_cashbox_summary
-                net_received = sum(
-                    (t.amount if t.type == TransactionType.INCOME else -t.amount)
-                    for t in CashTransaction.objects.filter(
-                        repair=repair, type__in=[TransactionType.INCOME, TransactionType.REFUND]
-                    )
-                )
+
+                # DİQQƏT: geri qaytarma/geri alma HƏR ÖDƏNİŞ ÜSULUNA (method) GÖRƏ AYRI
+                # hesablanır — məs. müştəri kartla ödəyibsə, geri qaytarma da kartdan
+                # yazılmalıdır, nağddan yox (əvvəllər bura baxmadan həmişə method="cash"
+                # yazılırdı, nəticədə kartla edilən ödənişin ləğvi nağd balansını səhvən
+                # azaldırdı, kart balansı isə "ödənilib" göstərməyə davam edirdi).
+                net_received_by_method: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+                for t in CashTransaction.objects.filter(
+                        repair=repair, type__in=[TransactionType.INCOME, TransactionType.REFUND]):
+                    net_received_by_method[t.method] += t.amount if t.type == TransactionType.INCOME else -t.amount
+
                 # Bu təmirə görə artıq təchizatçıya/xarici ustaya ödənilmiş məbləğ varsa (birbaşa
                 # usta ödənişi və ya alış zamanı "dərhal ödənildi" seçimi ilə), müştəri qeyd etdi ki,
                 # xidmət ləğv olunanda kassa mənfiyə düşməməlidir — yəni bu pul da geri alınmış sayılır
-                # (usta/təchizatçıdan geri tələb olunur). Ona görə eyni məbləğdə EXPENSE_REFUND yazırıq
-                # ki, kassa balansı bu əməliyyatdan əvvəlki vəziyyətinə tam qayıtsın.
-                paid_out = sum(
-                    (t.amount for t in CashTransaction.objects.filter(
-                        repair=repair, type__in=[TransactionType.SUPPLIER_PAYMENT, TransactionType.EXPENSE]
-                    )), Decimal("0"),
-                )
-                already_recovered = sum(
-                    (t.amount for t in CashTransaction.objects.filter(
-                        repair=repair, type=TransactionType.EXPENSE_REFUND
-                    )), Decimal("0"),
-                )
-                to_recover = paid_out - already_recovered
-                # Ləğvin XALİS kassa effekti: müştəriyə geri qaytarılan (-net_received) və
-                # təchizatçı/ustadan geri alınan (+to_recover) BİRGƏ hesablanır — əks halda
-                # (məs. yalnız REFUND-u ayrıca yoxlasaq) EXPENSE_REFUND-un həmin an kassaya
-                # qaytaracağı pulu nəzərə almadan, əslində kifayət edən balansı səhvən "yetərsiz"
-                # sayıb ləğvi lüzumsuz bloklaya bilərdik. #56: kassa heç vaxt mənfiyə düşməməlidir —
-                # bu yoxlama olmadan ləğv REFUND-u hər zaman yaradır və balans sakitcə mənfiyə enirdi.
-                net_cash_effect = to_recover - net_received
-                if net_cash_effect < 0:
-                    current = compute_cashbox_summary(repair.shop)["current_balance"]
+                # (usta/təchizatçıdan geri tələb olunur). Ona görə eyni məbləğdə (eyni method ilə)
+                # EXPENSE_REFUND yazırıq ki, hər balans bu əməliyyatdan əvvəlki vəziyyətinə qayıtsın.
+                paid_out_by_method: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+                for t in CashTransaction.objects.filter(
+                        repair=repair, type__in=[TransactionType.SUPPLIER_PAYMENT, TransactionType.EXPENSE]):
+                    paid_out_by_method[t.method] += t.amount
+                already_recovered_by_method: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+                for t in CashTransaction.objects.filter(repair=repair, type=TransactionType.EXPENSE_REFUND):
+                    already_recovered_by_method[t.method] += t.amount
+                to_recover_by_method = {
+                    m: paid_out_by_method[m] - already_recovered_by_method[m]
+                    for m in paid_out_by_method
+                }
+
+                # Ləğvin hər üsul üzrə XALİS effekti: müştəriyə geri qaytarılan (-net_received)
+                # və təchizatçı/ustadan geri alınan (+to_recover) BİRGƏ, EYNİ ÜSUL daxilində
+                # hesablanır — əks halda (məs. yalnız REFUND-u ayrıca yoxlasaq) EXPENSE_REFUND-un
+                # həmin an həmin balansa qaytaracağı pulu nəzərə almadan, əslində kifayət edən
+                # balansı səhvən "yetərsiz" sayıb ləğvi lüzumsuz bloklaya bilərdik. #56: heç bir
+                # balans mənfiyə düşməməlidir — bu yoxlama olmadan REFUND hər zaman yaradılır və
+                # balans sakitcə mənfiyə enirdi.
+                all_methods = set(net_received_by_method) | set(to_recover_by_method)
+                summary = compute_cashbox_summary(repair.shop)
+                for method in all_methods:
+                    net_cash_effect = to_recover_by_method.get(method, Decimal("0")) - net_received_by_method.get(method, Decimal("0"))
+                    if net_cash_effect >= 0:
+                        continue
+                    current = summary["current_balance"] if method == "cash" else summary["card_balance"]
                     if current + net_cash_effect < 0:
                         from rest_framework.exceptions import ValidationError
+                        label = "Kassada" if method == "cash" else "Kart/bank balansında"
                         raise ValidationError({
-                            "detail": f"Kassada vəsait yoxdur — ləğv üçün {-net_cash_effect} AZN lazımdır, "
-                                      f"cari balans isə {current} AZN. Əvvəlcə kassaya pul əlavə edin."
+                            "detail": f"{label} vəsait yoxdur — ləğv üçün {-net_cash_effect} AZN lazımdır, "
+                                      f"cari balans isə {current} AZN. Əvvəlcə balansa pul əlavə edin."
                         })
-                if net_received > 0:
-                    request = self.context.get("request")
-                    CashTransaction.objects.create(
-                        shop=repair.shop, branch=repair.branch, type=TransactionType.REFUND,
-                        amount=net_received, method="cash",
-                        description=f"{repair.number}, {repair.customer.full_name} — xidmət ləğv edildi, ödəniş geri qaytarıldı",
-                        repair=repair, created_by=getattr(request, "user", None),
-                    )
-                if to_recover > 0:
-                    request = self.context.get("request")
-                    CashTransaction.objects.create(
-                        shop=repair.shop, branch=repair.branch, type=TransactionType.EXPENSE_REFUND,
-                        amount=to_recover, method="cash",
-                        description=f"{repair.number}, {repair.customer.full_name} — xidmət ləğv edildi, təchizatçı/ustaya ödənilən məbləğ geri alındı",
-                        repair=repair, created_by=getattr(request, "user", None),
-                    )
+
+                request = self.context.get("request")
+                for method, net_received in net_received_by_method.items():
+                    if net_received > 0:
+                        CashTransaction.objects.create(
+                            shop=repair.shop, branch=repair.branch, type=TransactionType.REFUND,
+                            amount=net_received, method=method,
+                            description=f"{repair.number}, {repair.customer.full_name} — xidmət ləğv edildi, ödəniş geri qaytarıldı",
+                            repair=repair, created_by=getattr(request, "user", None),
+                        )
+                for method, to_recover in to_recover_by_method.items():
+                    if to_recover > 0:
+                        CashTransaction.objects.create(
+                            shop=repair.shop, branch=repair.branch, type=TransactionType.EXPENSE_REFUND,
+                            amount=to_recover, method=method,
+                            description=f"{repair.number}, {repair.customer.full_name} — xidmət ləğv edildi, təchizatçı/ustaya ödənilən məbləğ geri alındı",
+                            repair=repair, created_by=getattr(request, "user", None),
+                        )
             elif changed and old_status == RepairStatus.CANCELLED:
                 # Ləğv edilmiş təmir yenidən aktivləşdirilirsə, bağlı alışlar da geri aktivləşir
                 # və maya dəyəri yenidən onların cəminə görə hesablanır.

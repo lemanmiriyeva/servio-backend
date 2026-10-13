@@ -20,7 +20,7 @@ class CashTransactionSerializer(serializers.ModelSerializer):
         # Əl ilə "Xərc" əlavə edəndə kassada kifayət qədər pul yoxdursa, əməliyyat
         # rədd edilir — balans sakitcə mənfiyə düşmür (bax: assert_sufficient_balance).
         if validated_data.get("type") == TransactionType.EXPENSE:
-            assert_sufficient_balance(shop, validated_data["amount"])
+            assert_sufficient_balance(shop, validated_data["amount"], validated_data.get("method", "cash"))
         validated_data["shop"] = shop
         validated_data["branch"] = request.user.branch
         validated_data["created_by"] = request.user

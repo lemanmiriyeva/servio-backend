@@ -34,10 +34,11 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
             return Response({"detail": "Məbləğ sıfırdan böyük olmalıdır."}, status=status.HTTP_400_BAD_REQUEST)
 
         method = request.data.get("method", "cash")
-        # Kassada bu qədər pul yoxdursa, ödənişi qeydə almadan dayandırırıq —
-        # "Kassada vəsait yoxdur" (bax: assert_sufficient_balance).
+        # Kassada/kartda bu qədər pul yoxdursa, ödənişi qeydə almadan dayandırırıq —
+        # "Kassada vəsait yoxdur" (bax: assert_sufficient_balance). `method` ötürülür ki,
+        # kartla ödəniş kartın öz balansı ilə yoxlansın, nağd balansı ilə yox.
         from finance.models import assert_sufficient_balance
-        assert_sufficient_balance(supplier.shop, amount)
+        assert_sufficient_balance(supplier.shop, amount, method)
         remaining_to_apply = amount
         for purchase in supplier.purchases.filter(paid_amount__lt=models.F("amount")).order_by("purchased_at"):
             if remaining_to_apply <= 0:
@@ -153,15 +154,19 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
         if s.validated_data.get("paid_amount", 0) > s.validated_data["amount"]:
             return Response({"detail": "Ödənilən məbləğ alış məbləğindən çox ola bilməz."}, status=status.HTTP_400_BAD_REQUEST)
         upfront_paid = s.validated_data.get("paid_amount") or 0
+        # SupplierPurchase modelində "method" sahəsi yoxdur (yalnız ödənişin özü üçün
+        # mənalıdır) — ona görə "Dərhal ödənildi" seçiləndə hansı üsulla ödənildiyi birbaşa
+        # sorğu body-sindən oxunur. Göndərilməyibsə "cash" (əvvəlki davranış qorunur).
+        method = request.data.get("method") or "cash"
         if upfront_paid:
             # Alışla BİRLİKDƏ dərhal ödəniş edilirsə (məs. "iDoctor-dan nağdsız aldım,
-            # borcsuz"), kassada bu qədər pul yoxdursa alışın özü də yaradılmır —
+            # borcsuz"), kassada/kartda bu qədər pul yoxdursa alışın özü də yaradılmır —
             # əks halda alış qeydə düşər, amma ödəniş heç cür qeydə alınmaz.
             from finance.models import assert_sufficient_balance
-            assert_sufficient_balance(supplier.shop, upfront_paid)
+            assert_sufficient_balance(supplier.shop, upfront_paid, method)
         purchase = s.save(shop=supplier.shop, supplier=supplier)
         if purchase.paid_amount:
-            SupplierPurchasePayment.objects.create(purchase=purchase, amount=purchase.paid_amount, method="cash")
+            SupplierPurchasePayment.objects.create(purchase=purchase, amount=purchase.paid_amount, method=method)
             # BUG: burda əvvəllər yalnız SupplierPurchasePayment (alışın öz tarixçəsi) yaradılırdı,
             # amma Kassaya "Təchizatçı ödənişi" XƏRC qeydi yazılmırdı — halbuki `pay()` əməliyyatı
             # bunu edir. Nəticədə alış zamanı ödənilən pul (məs. iDoctor-a nağd/köçürmə ilə dərhal
@@ -170,7 +175,7 @@ class SupplierViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
             from finance.models import CashTransaction, TransactionType
             CashTransaction.objects.create(
                 shop=supplier.shop, branch=getattr(request.user, "branch", None),
-                type=TransactionType.SUPPLIER_PAYMENT, amount=purchase.paid_amount, method="cash",
+                type=TransactionType.SUPPLIER_PAYMENT, amount=purchase.paid_amount, method=method,
                 description=f"{supplier.name} — {purchase.description}",
                 supplier=supplier, repair=purchase.repair, created_by=request.user,
             )
