@@ -150,6 +150,12 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
     )
     part_supplier_id = serializers.IntegerField(required=False, allow_null=True, write_only=True)
     part_description = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    # DİQQƏT: "Nağd aldım — borcsuz" seçiləndə əvvəllər ödəniş üsulu HƏMİŞƏ "cash" idi —
+    # kartla ödəsə belə kassa balansı (nağd) yoxlanırdı, kart balansında kifayət qədər pul
+    # olsa belə "Kassada vəsait yoxdur" xətası verirdi. İndi bu, ayrıca seçilə bilir.
+    part_payment_method = serializers.ChoiceField(
+        choices=["cash", "card", "bank_transfer"], required=False, default="cash", write_only=True
+    )
     initial_payment_amount = serializers.DecimalField(
         max_digits=10, decimal_places=2, required=False, allow_null=True, write_only=True
     )
@@ -171,7 +177,7 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
             "payments", "supplier_purchases", "warranty_returns", "status_history",
             "paid_amount", "remaining_debt",
             "created_at",
-            "part_mode", "part_supplier_id", "part_description",
+            "part_mode", "part_supplier_id", "part_description", "part_payment_method",
             "initial_payment_amount", "initial_payment_method",
         ]
         read_only_fields = ["id", "number", "created_at"]
@@ -210,6 +216,7 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
         part_mode = validated_data.pop("part_mode", "none")
         part_supplier_id = validated_data.pop("part_supplier_id", None)
         part_description = validated_data.pop("part_description", "")
+        part_payment_method = validated_data.pop("part_payment_method", "cash")
         initial_payment_amount = validated_data.pop("initial_payment_amount", None)
         initial_payment_method = validated_data.pop("initial_payment_method", "cash")
 
@@ -264,29 +271,29 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
                     paid_amount = cost if part_mode == "cash" else 0
                     if paid_amount > 0:
                         from finance.models import assert_sufficient_balance
-                        assert_sufficient_balance(repair.shop, paid_amount, "cash")
+                        assert_sufficient_balance(repair.shop, paid_amount, part_payment_method)
                     purchase = SupplierPurchase.objects.create(
                         shop=repair.shop, supplier=supplier, description=full_desc,
                         amount=cost, paid_amount=paid_amount, repair=repair,
                     )
                     if paid_amount > 0:
-                        SupplierPurchasePayment.objects.create(purchase=purchase, amount=paid_amount, method="cash")
+                        SupplierPurchasePayment.objects.create(purchase=purchase, amount=paid_amount, method=part_payment_method)
                         from finance.models import CashTransaction, TransactionType
                         CashTransaction.objects.create(
                             shop=repair.shop, branch=repair.branch,
-                            type=TransactionType.SUPPLIER_PAYMENT, amount=paid_amount, method="cash",
+                            type=TransactionType.SUPPLIER_PAYMENT, amount=paid_amount, method=part_payment_method,
                             description=f"{supplier.name} — {full_desc}",
                             supplier=supplier, repair=repair, created_by=request.user,
                         )
                 elif part_mode == "cash":
-                    # Təchizatçı seçilməyib, sadəcə "Nağd aldım — borcsuz" — birbaşa Kassadan
-                    # Xərc kimi yazılır (bu, kassada pul yoxdursa rədd edəcək assert
-                    # sufficient_balance-ı işə salır, əvvəllər heç bir yoxlama olmurdu).
+                    # Təchizatçı seçilməyib, sadəcə "Nağd/kartla aldım — borcsuz" — birbaşa
+                    # Kassadan Xərc kimi yazılır, seçilmiş üsulun ÖZ balansı yoxlanır (nağdsa
+                    # nağd balansı, kartla/bank köçürməsiylə alınıbsa kart balansı).
                     from finance.models import CashTransaction, TransactionType, assert_sufficient_balance
-                    assert_sufficient_balance(repair.shop, cost, "cash")
+                    assert_sufficient_balance(repair.shop, cost, part_payment_method)
                     CashTransaction.objects.create(
                         shop=repair.shop, branch=repair.branch, type=TransactionType.EXPENSE,
-                        amount=cost, method="cash", description=full_desc,
+                        amount=cost, method=part_payment_method, description=full_desc,
                         repair=repair, created_by=request.user,
                     )
                 # part_mode == "credit" təchizatçısız — borc kimə aid ediləcəyi bilinmir,
