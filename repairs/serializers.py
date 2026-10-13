@@ -215,76 +215,96 @@ class RepairStatusUpdateSerializer(serializers.Serializer):
 
     def save(self, **kwargs):
         from django.utils import timezone
+        from django.db import transaction
         repair: RepairOrder = self.context["repair"]
         new_status = self.validated_data["status"]
         old_status = repair.status
         changed = new_status != old_status
-        repair.status = new_status
-        if new_status == RepairStatus.DELIVERED and not repair.delivered_at:
-            repair.delivered_at = timezone.now()
-            repair.warranty_started_at = timezone.now().date()
-        repair.save()
-        if changed and new_status == RepairStatus.CANCELLED:
-            # Təmir ləğv edilir — ona bağlı təchizatçı alışları da "ləğv edildi" kimi işarələnir
-            # (silinmir, tarixçədə qalır), ümumi təchizatçı borcundan isə çıxır.
-            from suppliers.models import PurchaseStatus
-            repair.supplier_purchases.update(status=PurchaseStatus.CANCELLED)
-            # Bu təmirə görə müştəridən artıq real pul alınıbsa (kassaya "Kassa"/gəlir kimi
-            # düşübsə), ləğv edəndə onu silmirik (maliyyə tarixçəsi qorunur), əvəzinə eyni
-            # məbləğdə "Geri qaytarma" qeydi əlavə edirik ki, Kassa balansı özü-özünə düzəlsin —
-            # müştəri "ləğv etdim, amma kassada qalır" şikayəti elə bunun üçün idi.
-            from finance.models import CashTransaction, TransactionType
-            net_received = sum(
-                (t.amount if t.type == TransactionType.INCOME else -t.amount)
-                for t in CashTransaction.objects.filter(
-                    repair=repair, type__in=[TransactionType.INCOME, TransactionType.REFUND]
+        # Hamısı bir tranzaksiyadadır: ləğv edərkən kassa yoxlaması (#56) uğursuz olub
+        # ValidationError atsa, təmirin statusu da "CANCELLED" kimi yarım-yolda qalmamalıdır —
+        # əks halda status dəyişmiş, amma pul geri qaytarılmamış/qeydə alınmamış olardı.
+        with transaction.atomic():
+            repair.status = new_status
+            if new_status == RepairStatus.DELIVERED and not repair.delivered_at:
+                repair.delivered_at = timezone.now()
+                repair.warranty_started_at = timezone.now().date()
+            repair.save()
+            if changed and new_status == RepairStatus.CANCELLED:
+                # Təmir ləğv edilir — ona bağlı təchizatçı alışları da "ləğv edildi" kimi işarələnir
+                # (silinmir, tarixçədə qalır), ümumi təchizatçı borcundan isə çıxır.
+                from suppliers.models import PurchaseStatus
+                repair.supplier_purchases.update(status=PurchaseStatus.CANCELLED)
+                # Bu təmirə görə müştəridən artıq real pul alınıbsa (kassaya "Kassa"/gəlir kimi
+                # düşübsə), ləğv edəndə onu silmirik (maliyyə tarixçəsi qorunur), əvəzinə eyni
+                # məbləğdə "Geri qaytarma" qeydi əlavə edirik ki, Kassa balansı özü-özünə düzəlsin —
+                # müştəri "ləğv etdim, amma kassada qalır" şikayəti elə bunun üçün idi.
+                from finance.models import CashTransaction, TransactionType, compute_cashbox_summary
+                net_received = sum(
+                    (t.amount if t.type == TransactionType.INCOME else -t.amount)
+                    for t in CashTransaction.objects.filter(
+                        repair=repair, type__in=[TransactionType.INCOME, TransactionType.REFUND]
+                    )
                 )
-            )
-            if net_received > 0:
-                request = self.context.get("request")
-                CashTransaction.objects.create(
-                    shop=repair.shop, branch=repair.branch, type=TransactionType.REFUND,
-                    amount=net_received, method="cash",
-                    description=f"{repair.number}, {repair.customer.full_name} — xidmət ləğv edildi, ödəniş geri qaytarıldı",
-                    repair=repair, created_by=getattr(request, "user", None),
+                # Bu təmirə görə artıq təchizatçıya/xarici ustaya ödənilmiş məbləğ varsa (birbaşa
+                # usta ödənişi və ya alış zamanı "dərhal ödənildi" seçimi ilə), müştəri qeyd etdi ki,
+                # xidmət ləğv olunanda kassa mənfiyə düşməməlidir — yəni bu pul da geri alınmış sayılır
+                # (usta/təchizatçıdan geri tələb olunur). Ona görə eyni məbləğdə EXPENSE_REFUND yazırıq
+                # ki, kassa balansı bu əməliyyatdan əvvəlki vəziyyətinə tam qayıtsın.
+                paid_out = sum(
+                    (t.amount for t in CashTransaction.objects.filter(
+                        repair=repair, type__in=[TransactionType.SUPPLIER_PAYMENT, TransactionType.EXPENSE]
+                    )), Decimal("0"),
                 )
-            # Bu təmirə görə artıq təchizatçıya/xarici ustaya ödənilmiş məbləğ varsa (birbaşa
-            # usta ödənişi və ya alış zamanı "dərhal ödənildi" seçimi ilə), müştəri qeyd etdi ki,
-            # xidmət ləğv olunanda kassa mənfiyə düşməməlidir — yəni bu pul da geri alınmış sayılır
-            # (usta/təchizatçıdan geri tələb olunur). Ona görə eyni məbləğdə EXPENSE_REFUND yazırıq
-            # ki, kassa balansı bu əməliyyatdan əvvəlki vəziyyətinə tam qayıtsın.
-            paid_out = sum(
-                (t.amount for t in CashTransaction.objects.filter(
-                    repair=repair, type__in=[TransactionType.SUPPLIER_PAYMENT, TransactionType.EXPENSE]
-                )), Decimal("0"),
-            )
-            already_recovered = sum(
-                (t.amount for t in CashTransaction.objects.filter(
-                    repair=repair, type=TransactionType.EXPENSE_REFUND
-                )), Decimal("0"),
-            )
-            to_recover = paid_out - already_recovered
-            if to_recover > 0:
-                request = self.context.get("request")
-                CashTransaction.objects.create(
-                    shop=repair.shop, branch=repair.branch, type=TransactionType.EXPENSE_REFUND,
-                    amount=to_recover, method="cash",
-                    description=f"{repair.number}, {repair.customer.full_name} — xidmət ləğv edildi, təchizatçı/ustaya ödənilən məbləğ geri alındı",
-                    repair=repair, created_by=getattr(request, "user", None),
+                already_recovered = sum(
+                    (t.amount for t in CashTransaction.objects.filter(
+                        repair=repair, type=TransactionType.EXPENSE_REFUND
+                    )), Decimal("0"),
                 )
-        elif changed and old_status == RepairStatus.CANCELLED:
-            # Ləğv edilmiş təmir yenidən aktivləşdirilirsə, bağlı alışlar da geri aktivləşir
-            # və maya dəyəri yenidən onların cəminə görə hesablanır.
-            from suppliers.models import PurchaseStatus, sync_repair_cost_price
-            repair.supplier_purchases.filter(status=PurchaseStatus.CANCELLED).update(status=PurchaseStatus.ACTIVE)
-            sync_repair_cost_price(repair)
-        if changed:
-            # Hər status dəyişikliyinin vaxtı qeydə alınır ("nə vaxtdan təmir prosesindədir",
-            # "nə vaxtdan hazırdır" və s. sualları üçün — bax RepairStatusHistory).
-            RepairStatusHistory.objects.create(repair=repair, status=new_status)
-        # Status dəyişəndə (xüsusən 'Təhvil verildi'-yə keçəndə) ödəniş statusunu
-        # yenidən hesabla — qalıq borc varsa indi 'debt' kimi işarələnəcək.
-        repair.recompute_payment_status()
+                to_recover = paid_out - already_recovered
+                # Ləğvin XALİS kassa effekti: müştəriyə geri qaytarılan (-net_received) və
+                # təchizatçı/ustadan geri alınan (+to_recover) BİRGƏ hesablanır — əks halda
+                # (məs. yalnız REFUND-u ayrıca yoxlasaq) EXPENSE_REFUND-un həmin an kassaya
+                # qaytaracağı pulu nəzərə almadan, əslində kifayət edən balansı səhvən "yetərsiz"
+                # sayıb ləğvi lüzumsuz bloklaya bilərdik. #56: kassa heç vaxt mənfiyə düşməməlidir —
+                # bu yoxlama olmadan ləğv REFUND-u hər zaman yaradır və balans sakitcə mənfiyə enirdi.
+                net_cash_effect = to_recover - net_received
+                if net_cash_effect < 0:
+                    current = compute_cashbox_summary(repair.shop)["current_balance"]
+                    if current + net_cash_effect < 0:
+                        from rest_framework.exceptions import ValidationError
+                        raise ValidationError({
+                            "detail": f"Kassada vəsait yoxdur — ləğv üçün {-net_cash_effect} AZN lazımdır, "
+                                      f"cari balans isə {current} AZN. Əvvəlcə kassaya pul əlavə edin."
+                        })
+                if net_received > 0:
+                    request = self.context.get("request")
+                    CashTransaction.objects.create(
+                        shop=repair.shop, branch=repair.branch, type=TransactionType.REFUND,
+                        amount=net_received, method="cash",
+                        description=f"{repair.number}, {repair.customer.full_name} — xidmət ləğv edildi, ödəniş geri qaytarıldı",
+                        repair=repair, created_by=getattr(request, "user", None),
+                    )
+                if to_recover > 0:
+                    request = self.context.get("request")
+                    CashTransaction.objects.create(
+                        shop=repair.shop, branch=repair.branch, type=TransactionType.EXPENSE_REFUND,
+                        amount=to_recover, method="cash",
+                        description=f"{repair.number}, {repair.customer.full_name} — xidmət ləğv edildi, təchizatçı/ustaya ödənilən məbləğ geri alındı",
+                        repair=repair, created_by=getattr(request, "user", None),
+                    )
+            elif changed and old_status == RepairStatus.CANCELLED:
+                # Ləğv edilmiş təmir yenidən aktivləşdirilirsə, bağlı alışlar da geri aktivləşir
+                # və maya dəyəri yenidən onların cəminə görə hesablanır.
+                from suppliers.models import PurchaseStatus, sync_repair_cost_price
+                repair.supplier_purchases.filter(status=PurchaseStatus.CANCELLED).update(status=PurchaseStatus.ACTIVE)
+                sync_repair_cost_price(repair)
+            if changed:
+                # Hər status dəyişikliyinin vaxtı qeydə alınır ("nə vaxtdan təmir prosesindədir",
+                # "nə vaxtdan hazırdır" və s. sualları üçün — bax RepairStatusHistory).
+                RepairStatusHistory.objects.create(repair=repair, status=new_status)
+            # Status dəyişəndə (xüsusən 'Təhvil verildi'-yə keçəndə) ödəniş statusunu
+            # yenidən hesabla — qalıq borc varsa indi 'debt' kimi işarələnəcək.
+            repair.recompute_payment_status()
         return repair
 
 
