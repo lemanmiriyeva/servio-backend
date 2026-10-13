@@ -136,6 +136,27 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
     warranty_end_date = serializers.ReadOnlyField()
     warranty_days_left = serializers.ReadOnlyField()
 
+    # DİQQƏT: bunlar RepairOrder-in öz sahələri DEYİL — "Yeni xidmət" formasının "Detal
+    # mənbəyi" (təchizatçıdan borc / nağd alındı) və "İlkin ödəniş" addımlarını YARADILMA
+    # ANINDA, təmirlə BİR YERD�ə, eyni DB tranzaksiyası daxilində yerinə yetirmək üçün əlavə
+    # ediliblər (bax: create() aşağıda). Əvvəllər bunlar ayrı-ayrı HTTP sorğuları (əvvəlcə
+    # təmir yaradılır, SONRA ayrıca supplier-purchase/payment sorğusu göndərilirdi) idi —
+    # nəticədə kassada pul olmadığı üçün ikinci addım rədd edilsə belə, təmirin özü artıq
+    # yaradılmış və DB-də qalmış olurdu ("error göstərir, amma yenə də yaradır"). İndi hamısı
+    # tək bir atomic() bloku daxilindədir: balans yoxlanışı uğursuz olarsa, TƏMİR DƏ DAXİL
+    # OLMAQLA heç nə yaradılmır.
+    part_mode = serializers.ChoiceField(
+        choices=["none", "credit", "cash"], required=False, default="none", write_only=True
+    )
+    part_supplier_id = serializers.IntegerField(required=False, allow_null=True, write_only=True)
+    part_description = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    initial_payment_amount = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True, write_only=True
+    )
+    initial_payment_method = serializers.ChoiceField(
+        choices=["cash", "card", "bank_transfer"], required=False, default="cash", write_only=True
+    )
+
     class Meta:
         model = RepairOrder
         fields = [
@@ -150,6 +171,8 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
             "payments", "supplier_purchases", "warranty_returns", "status_history",
             "paid_amount", "remaining_debt",
             "created_at",
+            "part_mode", "part_supplier_id", "part_description",
+            "initial_payment_amount", "initial_payment_method",
         ]
         read_only_fields = ["id", "number", "created_at"]
 
@@ -179,34 +202,118 @@ class RepairOrderDetailSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
+        from django.db import transaction
+        from rest_framework.exceptions import ValidationError
+
         request = self.context["request"]
+        # Bunlar model sahəsi deyil — DB-yə birbaşa yazılmazdan əvvəl çıxarılır.
+        part_mode = validated_data.pop("part_mode", "none")
+        part_supplier_id = validated_data.pop("part_supplier_id", None)
+        part_description = validated_data.pop("part_description", "")
+        initial_payment_amount = validated_data.pop("initial_payment_amount", None)
+        initial_payment_method = validated_data.pop("initial_payment_method", "cash")
+
         validated_data["shop"] = request.user.shop
         validated_data["branch"] = request.user.branch
         validated_data["created_by"] = request.user
-        repair = super().create(validated_data)
-        # Cihaz xarici ustaya göndərilibsə (technician_name doldurulub) və ustaya verilən
-        # məbləğ (cost_price) qeyd olunubsa — bu, təchizatçı siyahısından seçilən bir
-        # "Supplier" deyil, sadəcə ad yazılan xarici usta olduğu üçün heç vaxt Kassadan
-        # məxaric kimi düşmürdü (yalnız profit = sale_price - cost_price hesablamasında
-        # görünürdü, real pul Kassada "qalırdı" kimi göstərilirdi). İndi bu məbləği birbaşa
-        # Kassadan xərc kimi yazırıq ki, balans da real vəziyyəti göstərsin.
-        if repair.technician_name and repair.cost_price and repair.cost_price > 0:
-            from finance.models import CashTransaction, TransactionType, assert_sufficient_balance
-            assert_sufficient_balance(repair.shop, repair.cost_price, "cash")
-            # DİQQƏT: type=SUPPLIER_PAYMENT (EXPENSE YOX) — bu məbləğ artıq repair.cost_price-ın
-            # (maya dəyəri) özüdür və Hesabatlarda "total_cost" buradan hesablanır. Əgər bunu
-            # EXPENSE kimi yazsaq, Hesabatlardakı "xərclər" sətri bu məbləği BİR DƏ çıxarar —
-            # eyni 100 AZN həm maya dəyərində, həm də "xərc"də görünüb xalis mənfəəti iki dəfə
-            # azaldardı. SUPPLIER_PAYMENT, təchizatçıya edilən bütün ödənişlərlə eyni kateqoriyada
-            # olduğu üçün (bax: suppliers/views.py) Kassa balansına təsiri eynidir, amma Hesabat
-            # mənfəət hesablamasına (yalnız EXPENSE-i çıxan) ikinci dəfə daxil olmur.
-            CashTransaction.objects.create(
-                shop=repair.shop, branch=repair.branch, type=TransactionType.SUPPLIER_PAYMENT,
-                amount=repair.cost_price, method="cash",
-                expense_category="Xarici usta ödənişi",
-                description=f"{repair.number}, {repair.customer.full_name} — ustaya ({repair.technician_name}) ödənildi",
-                repair=repair, created_by=request.user,
-            )
+
+        # DİQQƏT (əsas düzəliş): bütün bu addımlar BİR tranzaksiya daxilindədir. Əvvəllər
+        # təmir əvvəlcə yaradılıb commit olunur, SONRA detal/ödəniş üçün ayrıca sorğular
+        # göndərilirdi — kassada pul olmadığı üçün o sonrakı addım rədd edilsə belə, təmirin
+        # özü artıq DB-də qalmış olurdu. İndi assert_sufficient_balance HƏR hansı addımda
+        # ValidationError qaldırarsa, bu bloku əhatə edən atomic() TƏMİR DƏ DAXİL OLMAQLA
+        # hər şeyi geri alır (rollback) — heç nə yaradılmır.
+        with transaction.atomic():
+            repair = super().create(validated_data)
+
+            # Cihaz xarici ustaya göndərilibsə (technician_name doldurulub) və ustaya verilən
+            # məbləğ (cost_price) qeyd olunubsa — bu, təchizatçı siyahısından seçilən bir
+            # "Supplier" deyil, sadəcə ad yazılan xarici usta olduğu üçün heç vaxt Kassadan
+            # məxaric kimi düşmürdü (yalnız profit = sale_price - cost_price hesablamasında
+            # görünürdü, real pul Kassada "qalırdı" kimi göstərilirdi). İndi bu məbləği birbaşa
+            # Kassadan xərc kimi yazırıq ki, balans da real vəziyyəti göstərsin.
+            if repair.technician_name and repair.cost_price and repair.cost_price > 0:
+                from finance.models import CashTransaction, TransactionType, assert_sufficient_balance
+                assert_sufficient_balance(repair.shop, repair.cost_price, "cash")
+                # DİQQƏT: type=SUPPLIER_PAYMENT (EXPENSE YOX) — bu məbləğ artıq repair.cost_price-ın
+                # (maya dəyəri) özüdür və Hesabatlarda "total_cost" buradan hesablanır. Əgər bunu
+                # EXPENSE kimi yazsaq, Hesabatlardakı "xərclər" sətri bu məbləği BİR DƏ çıxarar —
+                # eyni 100 AZN həm maya dəyərində, həm də "xərc"də görünüb xalis mənfəəti iki dəfə
+                # azaldardı. SUPPLIER_PAYMENT, təchizatçıya edilən bütün ödənişlərlə eyni kateqoriyada
+                # olduğu üçün (bax: suppliers/views.py) Kassa balansına təsiri eynidir, amma Hesabat
+                # mənfəət hesablamasına (yalnız EXPENSE-i çıxan) ikinci dəfə daxil olmur.
+                CashTransaction.objects.create(
+                    shop=repair.shop, branch=repair.branch, type=TransactionType.SUPPLIER_PAYMENT,
+                    amount=repair.cost_price, method="cash",
+                    expense_category="Xarici usta ödənişi",
+                    description=f"{repair.number}, {repair.customer.full_name} — ustaya ({repair.technician_name}) ödənildi",
+                    repair=repair, created_by=request.user,
+                )
+
+            # "Detal mənbəyi": təchizatçıdan borcla / nağd alındı.
+            cost = repair.cost_price or 0
+            if part_mode in ("credit", "cash") and cost and cost > 0:
+                desc = (part_description or repair.issue_description or "Detal").strip()
+                full_desc = f"{desc} — {repair.device_brand} {repair.device_model} ({repair.number})".strip()
+                if part_supplier_id:
+                    from suppliers.models import Supplier, SupplierPurchase, SupplierPurchasePayment
+                    try:
+                        supplier = Supplier.objects.get(pk=part_supplier_id, shop=repair.shop)
+                    except Supplier.DoesNotExist:
+                        raise ValidationError({"detail": "Seçilmiş təchizatçı tapılmadı."})
+                    paid_amount = cost if part_mode == "cash" else 0
+                    if paid_amount > 0:
+                        from finance.models import assert_sufficient_balance
+                        assert_sufficient_balance(repair.shop, paid_amount, "cash")
+                    purchase = SupplierPurchase.objects.create(
+                        shop=repair.shop, supplier=supplier, description=full_desc,
+                        amount=cost, paid_amount=paid_amount, repair=repair,
+                    )
+                    if paid_amount > 0:
+                        SupplierPurchasePayment.objects.create(purchase=purchase, amount=paid_amount, method="cash")
+                        from finance.models import CashTransaction, TransactionType
+                        CashTransaction.objects.create(
+                            shop=repair.shop, branch=repair.branch,
+                            type=TransactionType.SUPPLIER_PAYMENT, amount=paid_amount, method="cash",
+                            description=f"{supplier.name} — {full_desc}",
+                            supplier=supplier, repair=repair, created_by=request.user,
+                        )
+                elif part_mode == "cash":
+                    # Təchizatçı seçilməyib, sadəcə "Nağd aldım — borcsuz" — birbaşa Kassadan
+                    # Xərc kimi yazılır (bu, kassada pul yoxdursa rədd edəcək assert
+                    # sufficient_balance-ı işə salır, əvvəllər heç bir yoxlama olmurdu).
+                    from finance.models import CashTransaction, TransactionType, assert_sufficient_balance
+                    assert_sufficient_balance(repair.shop, cost, "cash")
+                    CashTransaction.objects.create(
+                        shop=repair.shop, branch=repair.branch, type=TransactionType.EXPENSE,
+                        amount=cost, method="cash", description=full_desc,
+                        repair=repair, created_by=request.user,
+                    )
+                # part_mode == "credit" təchizatçısız — borc kimə aid ediləcəyi bilinmir,
+                # ona görə heç nə yaradılmır (frontend bunu seçməyə məcbur edir).
+
+            # İlkin ödəniş (addım 4) — əvvəllər təmir yaradıldıqdan sonra AYRICA sorğu ilə
+            # göndərilirdi; indi eyni tranzaksiyadadır. DİQQƏT: bu, Kassaya pul ƏLAVƏ edən
+            # (INCOME) bir əməliyyatdır, ona görə assert_sufficient_balance BURADA tətbiq
+            # OLUNMUR — həmin yoxlama yalnız kassadan pul ÇIXAN (EXPENSE və s.) əməliyyatlar
+            # üçündür (bax: RepairPaymentCreateSerializer.save() — orada da yoxdur).
+            if initial_payment_amount and initial_payment_amount > 0:
+                from .models import RepairPayment
+                RepairPayment.objects.create(
+                    repair=repair, amount=initial_payment_amount, method=initial_payment_method,
+                    received_by=request.user,
+                )
+                from finance.models import CashTransaction, TransactionType
+                CashTransaction.objects.create(
+                    shop=repair.shop, branch=repair.branch, type=TransactionType.INCOME,
+                    amount=initial_payment_amount, method=initial_payment_method,
+                    description=f"{repair.number}, {repair.customer.full_name}",
+                    repair=repair, created_by=request.user,
+                )
+                if hasattr(repair, "_prefetched_objects_cache"):
+                    repair._prefetched_objects_cache.pop("payments", None)
+                repair.recompute_payment_status()
+
         return repair
 
 
