@@ -147,9 +147,53 @@ class ReportsSummaryView(APIView):
         # .exclude(status=CANCELLED)), ona görə onun geri qaytarmasını bir də mənfəətdən
         # çıxsaq, heç olmayan "gəliri" iki dəfə mənfi hesablamış olarıq. Yalnız real
         # zəmanət qaytarması (aktiv/tamamlanmış təmirə bağlı) mənfəəti azaltmalıdır.
-        refunds = (CashTransaction.objects.filter(
+        #
+        # DİQQƏT (bax: repairs/serializers.py-dəki RESTORE_MARK düzəlişi): sadəcə
+        # "repair.status == CANCELLED-dirsə çıxma" kafi deyil. Əgər təmir LƏĞV EDİLİB
+        # SONRA YENİDƏN AKTİVLƏŞDİRİLİBSƏ, köhnə ləğv zamanı yaradılmış REFUND sətri
+        # bazada qalır, amma indi repair.status artıq CANCELLED DEYİL — ona görə əvvəlki
+        # sadə filtr bu köhnə REFUND-u "real zəmanət qaytarması" kimi sayıb hər ləğv+bərpa
+        # dövründə mənfəətdən bir də (səhvən) çıxırdı ("hər dəfə 50 mənfiyə aparır" şikayəti
+        # məhz bu idi). Düzgün qayda: əgər bu REFUND artıq eyni təmir+üsul üzrə bərpa edici
+        # INCOME (RESTORE_MARK） ilə "örtülübsə", demək pul artıq Kassaya qaytarılıb və bu
+        # REFUND daha "real" itki sayılmamalıdır — yalnız HƏLƏ BƏRPA OLUNMAMIŞ xalis hissə
+        # mənfəətdən çıxılır.
+        from collections import defaultdict
+        RESTORE_MARK = "yenidən aktivləşdirildi"
+
+        refund_rows = list(CashTransaction.objects.filter(
             shop=shop, type=TransactionType.REFUND, created_at__date__gte=start, created_at__date__lte=end
-        ).exclude(repair__status=RepairStatus.CANCELLED).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+        ).select_related("repair"))
+
+        refunds = Decimal("0")
+        counted_repair_methods = set()
+        for t in refund_rows:
+            if t.repair_id is None:
+                refunds += t.amount
+                continue
+            if t.repair.status == RepairStatus.CANCELLED:
+                # Təmir HAZIRDA ləğv olunmuş vəziyyətdədir — satışı onsuz da total_sales-a
+                # daxil deyil, ona görə geri qaytarmasını mənfəətdən çıxmırıq.
+                continue
+            key = (t.repair_id, t.method)
+            if key in counted_repair_methods:
+                continue  # Eyni təmir+üsul üzrə yalnız BİR dəfə hesablanır (aşağıda cəmi özü aparılır).
+            counted_repair_methods.add(key)
+
+            total_refunded = CashTransaction.objects.filter(
+                repair_id=t.repair_id, type=TransactionType.REFUND, method=t.method,
+            ).aggregate(s=Sum("amount"))["s"] or Decimal("0")
+            total_restored = CashTransaction.objects.filter(
+                repair_id=t.repair_id, type=TransactionType.INCOME, method=t.method,
+                description__icontains=RESTORE_MARK,
+            ).aggregate(s=Sum("amount"))["s"] or Decimal("0")
+            unrestored_total = max(total_refunded - total_restored, Decimal("0"))
+
+            refund_in_period = CashTransaction.objects.filter(
+                repair_id=t.repair_id, type=TransactionType.REFUND, method=t.method,
+                created_at__date__gte=start, created_at__date__lte=end,
+            ).aggregate(s=Sum("amount"))["s"] or Decimal("0")
+            refunds += min(refund_in_period, unrestored_total)
 
         customer_debt = sum((r.remaining_debt for r in RepairOrder.objects.filter(
             shop=shop, payment_status=PaymentStatus.DEBT)), Decimal("0"))
