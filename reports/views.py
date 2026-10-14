@@ -10,7 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from accounts.mixins import HasModulePermission
 from accounts.models import Module
 from customers.models import Customer
-from repairs.models import RepairOrder, RepairStatus, PaymentStatus
+from repairs.models import RepairOrder, RepairPayment, RepairStatus, PaymentStatus
 from finance.models import CashTransaction, TransactionType, compute_cashbox_summary
 from suppliers.models import Supplier
 from marketplace.models import MarketplaceOrder, OrderStatus
@@ -131,12 +131,38 @@ class ReportsSummaryView(APIView):
         start = request.query_params.get("start") or today.replace(day=1).isoformat()
         end = request.query_params.get("end") or today.isoformat()
 
+        # DİQQƏT (əsas dəyişiklik — "pul ödənilməyibsə, hesabatlara düşməsin" tələbi):
+        # əvvəllər "satış" (total_sales) və "maya dəyəri" (total_cost) təmir YARADILAN
+        # kimi (created_at-a görə) hesablanırdı — borc olsa belə, hətta heç nə
+        # ödənilməsə belə, rəqəm elə həmin an Hesabatlara düşürdü. İstifadəçinin dediyi
+        # kimi: Kassadakı məntiq eyni olmalıdır — pul REAL daxil olanda (RepairPayment)
+        # "satış", REAL xərclənəndə (SUPPLIER_PAYMENT) "maya dəyəri" sayılmalıdır. İndi
+        # hər ikisi REAL pul hərəkətlərinə (CashTransaction/RepairPayment-in tarixinə)
+        # görə hesablanır, təmirin YARADILMA tarixinə görə yox.
         repairs = RepairOrder.objects.filter(
             shop=shop, created_at__date__gte=start, created_at__date__lte=end
         ).exclude(status=RepairStatus.CANCELLED)
 
-        total_sales = repairs.aggregate(s=Sum("sale_price"))["s"] or Decimal("0")
-        total_cost = repairs.aggregate(s=Sum("cost_price"))["s"] or Decimal("0")
+        sales_rows = (RepairPayment.objects.filter(
+            repair__shop=shop, paid_at__date__gte=start, paid_at__date__lte=end,
+        ).exclude(repair__status=RepairStatus.CANCELLED).select_related("repair"))
+        total_sales = sum((p.amount for p in sales_rows), Decimal("0"))
+
+        # Maya dəyəri — Kassa səhifəsindəki "Təchizatçı ödənişi" qutusu ilə EYNİ məntiq
+        # (bax: finance/models.py compute_cashbox_summary və cashbox/page.tsx):
+        # SUPPLIER_PAYMENT (real xərclənən) − EXPENSE_REFUND (geri alınan). Bu, ləğv/
+        # yenidən aktivləşdirmə dövrlərində də avtomatik düzgün nəticə verir, çünki hər
+        # "bərpa" həm yeni SUPPLIER_PAYMENT, həm də əvvəlki EXPENSE_REFUND kimi qeydə
+        # alınıb — ikisi bir-birini balanslaşdırır.
+        cost_paid = (CashTransaction.objects.filter(
+            shop=shop, type=TransactionType.SUPPLIER_PAYMENT,
+            created_at__date__gte=start, created_at__date__lte=end,
+        ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+        cost_recovered = (CashTransaction.objects.filter(
+            shop=shop, type=TransactionType.EXPENSE_REFUND,
+            created_at__date__gte=start, created_at__date__lte=end,
+        ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+        total_cost = cost_paid - cost_recovered
 
         expenses = (CashTransaction.objects.filter(
             shop=shop, type=TransactionType.EXPENSE, created_at__date__gte=start, created_at__date__lte=end
@@ -199,9 +225,35 @@ class ReportsSummaryView(APIView):
             shop=shop, payment_status=PaymentStatus.DEBT)), Decimal("0"))
         supplier_debt = sum((s.total_debt for s in Supplier.objects.filter(shop=shop)), Decimal("0"))
 
-        by_service = (repairs.values("issue_description")
-                      .annotate(count=Count("id"), sales=Sum("sale_price"), cost=Sum("cost_price"))
-                      .order_by("-sales")[:8])
+        # Xidmət üzrə bölgü də eyni REAL-pul məntiqinə köçürülür ki, aşağıdakı cədvəl
+        # yuxarıdakı ümumi rəqəmlərlə ZİDDİYYƏT TƏŞKİL ETMƏSİN (əvvəllər bu, hələ də
+        # köhnə "yaradılan kimi sayılır" məntiqini işlədirdi).
+        by_service_sales: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        by_service_repairs: dict[str, set] = defaultdict(set)
+        for p in sales_rows:
+            key = p.repair.issue_description
+            by_service_sales[key] += p.amount
+            by_service_repairs[key].add(p.repair_id)
+
+        by_service_cost: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        for t in CashTransaction.objects.filter(
+                shop=shop, type=TransactionType.SUPPLIER_PAYMENT, repair__isnull=False,
+                created_at__date__gte=start, created_at__date__lte=end).select_related("repair"):
+            by_service_cost[t.repair.issue_description] += t.amount
+        for t in CashTransaction.objects.filter(
+                shop=shop, type=TransactionType.EXPENSE_REFUND, repair__isnull=False,
+                created_at__date__gte=start, created_at__date__lte=end).select_related("repair"):
+            by_service_cost[t.repair.issue_description] -= t.amount
+
+        by_service = sorted((
+            {
+                "issue_description": key,
+                "count": len(by_service_repairs.get(key, ())),
+                "sales": by_service_sales.get(key, Decimal("0")),
+                "cost": by_service_cost.get(key, Decimal("0")),
+            }
+            for key in (set(by_service_sales) | set(by_service_cost))
+        ), key=lambda r: -r["sales"])[:8]
 
         by_supplier = [
             {"name": s.name, "purchased": s.total_purchased, "paid": s.total_paid, "debt": s.total_debt}
