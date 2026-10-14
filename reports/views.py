@@ -235,15 +235,22 @@ class ReportsSummaryView(APIView):
             by_service_sales[key] += p.amount
             by_service_repairs[key].add(p.repair_id)
 
+        # DİQQƏT: ləğv olunmuş təmirlər satış tərəfindən artıq çıxarılıb (yuxarı,
+        # sales_rows.exclude(status=CANCELLED)) — maya dəyəri tərəfi də eyni qaydaya
+        # tabe olmalıdır, əks halda ləğv zamanı yaranan EXPENSE_REFUND (xərcin geri
+        # alınması) bu artıq mövcud olmayan xidmətin sətirində "mənfi xərc" kimi qalıb
+        # qalır (məhz "6544" sətrinin boş/səhv görünməsinin səbəbi budur).
         by_service_cost: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
         for t in CashTransaction.objects.filter(
                 shop=shop, type=TransactionType.SUPPLIER_PAYMENT, repair__isnull=False,
-                created_at__date__gte=start, created_at__date__lte=end).select_related("repair"):
+                created_at__date__gte=start, created_at__date__lte=end
+        ).exclude(repair__status=RepairStatus.CANCELLED).select_related("repair"):
             by_service_cost[t.repair.issue_description] += t.amount
             by_service_repairs[t.repair.issue_description].add(t.repair_id)
         for t in CashTransaction.objects.filter(
                 shop=shop, type=TransactionType.EXPENSE_REFUND, repair__isnull=False,
-                created_at__date__gte=start, created_at__date__lte=end).select_related("repair"):
+                created_at__date__gte=start, created_at__date__lte=end
+        ).exclude(repair__status=RepairStatus.CANCELLED).select_related("repair"):
             by_service_cost[t.repair.issue_description] -= t.amount
             by_service_repairs[t.repair.issue_description].add(t.repair_id)
 
