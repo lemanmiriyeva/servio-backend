@@ -10,7 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from accounts.mixins import HasModulePermission
 from accounts.models import Module
 from customers.models import Customer
-from repairs.models import RepairOrder, RepairStatus, PaymentStatus
+from repairs.models import RepairOrder, RepairPayment, RepairStatus, PaymentStatus
 from finance.models import CashTransaction, TransactionType, compute_cashbox_summary
 from suppliers.models import Supplier
 from marketplace.models import MarketplaceOrder, OrderStatus
@@ -131,18 +131,38 @@ class ReportsSummaryView(APIView):
         start = request.query_params.get("start") or today.replace(day=1).isoformat()
         end = request.query_params.get("end") or today.isoformat()
 
-        # DİQQƏT (əsas dəyişiklik): istifadəçi dəqiqləşdirdi — satış/maya dəyəri yalnız
-        # təmir "Təhvil verildi" statusuna keçəndə Hesabatlara düşməlidir (ödəniş hələ
-        # tam olunmasa belə) — "yaradılan kimi" (created_at) DEYİL, "təhvil verilən kimi"
-        # (delivered_at) sayılır. Bir "RECEIVED"/"DIAGNOSING"/borclu təmir indi Hesabatlarda
-        # heç görünmür, tam Təhvil veriləndə (delivered_at bu dövrə düşəndə) bir dəfəyə
-        # tam sale_price/cost_price kimi düşür.
-        delivered_repairs = RepairOrder.objects.filter(
-            shop=shop, status=RepairStatus.DELIVERED,
-            delivered_at__date__gte=start, delivered_at__date__lte=end,
-        )
-        total_sales = delivered_repairs.aggregate(s=Sum("sale_price"))["s"] or Decimal("0")
-        total_cost = delivered_repairs.aggregate(s=Sum("cost_price"))["s"] or Decimal("0")
+        # DİQQƏT (əsas dəyişiklik — "pul ödənilməyibsə, hesabatlara düşməsin" tələbi):
+        # əvvəllər "satış" (total_sales) və "maya dəyəri" (total_cost) təmir YARADILAN
+        # kimi (created_at-a görə) hesablanırdı — borc olsa belə, hətta heç nə
+        # ödənilməsə belə, rəqəm elə həmin an Hesabatlara düşürdü. İstifadəçinin dediyi
+        # kimi: Kassadakı məntiq eyni olmalıdır — pul REAL daxil olanda (RepairPayment)
+        # "satış", REAL xərclənəndə (SUPPLIER_PAYMENT) "maya dəyəri" sayılmalıdır. İndi
+        # hər ikisi REAL pul hərəkətlərinə (CashTransaction/RepairPayment-in tarixinə)
+        # görə hesablanır, təmirin YARADILMA tarixinə görə yox.
+        repairs = RepairOrder.objects.filter(
+            shop=shop, created_at__date__gte=start, created_at__date__lte=end
+        ).exclude(status=RepairStatus.CANCELLED)
+
+        sales_rows = (RepairPayment.objects.filter(
+            repair__shop=shop, paid_at__date__gte=start, paid_at__date__lte=end,
+        ).exclude(repair__status=RepairStatus.CANCELLED).select_related("repair"))
+        total_sales = sum((p.amount for p in sales_rows), Decimal("0"))
+
+        # Maya dəyəri — Kassa səhifəsindəki "Təchizatçı ödənişi" qutusu ilə EYNİ məntiq
+        # (bax: finance/models.py compute_cashbox_summary və cashbox/page.tsx):
+        # SUPPLIER_PAYMENT (real xərclənən) − EXPENSE_REFUND (geri alınan). Bu, ləğv/
+        # yenidən aktivləşdirmə dövrlərində də avtomatik düzgün nəticə verir, çünki hər
+        # "bərpa" həm yeni SUPPLIER_PAYMENT, həm də əvvəlki EXPENSE_REFUND kimi qeydə
+        # alınıb — ikisi bir-birini balanslaşdırır.
+        cost_paid = (CashTransaction.objects.filter(
+            shop=shop, type=TransactionType.SUPPLIER_PAYMENT,
+            created_at__date__gte=start, created_at__date__lte=end,
+        ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+        cost_recovered = (CashTransaction.objects.filter(
+            shop=shop, type=TransactionType.EXPENSE_REFUND,
+            created_at__date__gte=start, created_at__date__lte=end,
+        ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+        total_cost = cost_paid - cost_recovered
 
         expenses = (CashTransaction.objects.filter(
             shop=shop, type=TransactionType.EXPENSE, created_at__date__gte=start, created_at__date__lte=end
@@ -205,15 +225,49 @@ class ReportsSummaryView(APIView):
             shop=shop, payment_status=PaymentStatus.DEBT)), Decimal("0"))
         supplier_debt = sum((s.total_debt for s in Supplier.objects.filter(shop=shop)), Decimal("0"))
 
-        # Xidmət üzrə bölgü də eyni "yalnız Təhvil verildi" məntiqini izləyir ki,
-        # aşağıdakı cədvəl yuxarıdakı ümumi rəqəmlərlə ZİDDİYYƏT TƏŞKİL ETMƏSİN.
-        by_service = (delivered_repairs.values("issue_description")
-                      .annotate(count=Count("id"), sales=Sum("sale_price"), cost=Sum("cost_price"))
-                      .order_by("-sales")[:8])
+        # Xidmət üzrə bölgü də eyni REAL-pul məntiqinə köçürülür ki, aşağıdakı cədvəl
+        # yuxarıdakı ümumi rəqəmlərlə ZİDDİYYƏT TƏŞKİL ETMƏSİN (əvvəllər bu, hələ də
+        # köhnə "yaradılan kimi sayılır" məntiqini işlədirdi).
+        by_service_sales: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        by_service_repairs: dict[str, set] = defaultdict(set)
+        for p in sales_rows:
+            key = p.repair.issue_description
+            by_service_sales[key] += p.amount
+            by_service_repairs[key].add(p.repair_id)
 
+        by_service_cost: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        for t in CashTransaction.objects.filter(
+                shop=shop, type=TransactionType.SUPPLIER_PAYMENT, repair__isnull=False,
+                created_at__date__gte=start, created_at__date__lte=end).select_related("repair"):
+            by_service_cost[t.repair.issue_description] += t.amount
+            by_service_repairs[t.repair.issue_description].add(t.repair_id)
+        for t in CashTransaction.objects.filter(
+                shop=shop, type=TransactionType.EXPENSE_REFUND, repair__isnull=False,
+                created_at__date__gte=start, created_at__date__lte=end).select_related("repair"):
+            by_service_cost[t.repair.issue_description] -= t.amount
+            by_service_repairs[t.repair.issue_description].add(t.repair_id)
+
+        # Ləğv olunub geri qaytarılan (xərc + geri qaytarma bir-birini tam sıfırlayan)
+        # və heç bir ödəniş almayan xidmətlər cədvəldə "0 ədəd · 0 AZN" kimi boş sətir
+        # kimi görünməməlidir — ona görə satışı VƏ maya dəyəri hər ikisi düz sıfır olan
+        # sətirləri siyahıdan çıxarırıq.
+        by_service = sorted((
+            {
+                "issue_description": key,
+                "count": len(by_service_repairs.get(key, ())),
+                "sales": by_service_sales.get(key, Decimal("0")),
+                "cost": by_service_cost.get(key, Decimal("0")),
+            }
+            for key in (set(by_service_sales) | set(by_service_cost))
+            if by_service_sales.get(key, Decimal("0")) != 0 or by_service_cost.get(key, Decimal("0")) != 0
+        ), key=lambda r: -r["sales"])[:8]
+
+        # Borcu olmayan təchizatçı "Təchizatçılar üzrə borc" siyahısında boş sətir
+        # kimi görünməsin — yalnız real borcu olanlar göstərilir.
         by_supplier = [
             {"name": s.name, "purchased": s.total_purchased, "paid": s.total_paid, "debt": s.total_debt}
             for s in Supplier.objects.filter(shop=shop)
+            if s.total_debt and s.total_debt != 0
         ]
 
         # Marketplace (digər mağazalara satış) — əvvəllər bu hesabata heç düşmürdü,
@@ -245,7 +299,7 @@ class ReportsSummaryView(APIView):
             "net_profit": (total_sales - total_cost) - expenses - refunds + marketplace_profit,
             "customer_debt_total": customer_debt,
             "supplier_debt_total": supplier_debt,
-            "repair_count": delivered_repairs.count(),
+            "repair_count": repairs.count(),
             "customer_count": Customer.objects.filter(shop=shop).count(),
             "by_service": [
                 {"service": r["issue_description"], "count": r["count"],
