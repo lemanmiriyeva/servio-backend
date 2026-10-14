@@ -330,6 +330,13 @@ class RepairStatusUpdateSerializer(serializers.Serializer):
     def save(self, **kwargs):
         from django.utils import timezone
         from django.db import transaction
+        # DİQQƏT: `Decimal` import YALNIZ funksiyanın ƏVVƏLİNDƏ olmalıdır — Python-da bir
+        # funksiya daxilində hər hansı yerdə (hətta aşağıdaki "elif" qolunda) "import" olsa,
+        # həmin ad funksiyanın BAŞDAN-SONA hər yerində "local" sayılır, yuxarıdaki "if" qolu
+        # da daxil olmaqla. Əvvəllər bu import aşağıda (yalnız "elif" qolunda) idi və bu,
+        # yuxarıdaki "if" qolundaki `lambda: Decimal("0")`-un işə düşən zaman "Decimal" adını
+        # tapa bilməməsinə (NameError) səbəb olurdu.
+        from decimal import Decimal
         repair: RepairOrder = self.context["repair"]
         new_status = self.validated_data["status"]
         old_status = repair.status
@@ -427,6 +434,74 @@ class RepairStatusUpdateSerializer(serializers.Serializer):
                 from suppliers.models import PurchaseStatus, sync_repair_cost_price
                 repair.supplier_purchases.filter(status=PurchaseStatus.CANCELLED).update(status=PurchaseStatus.ACTIVE)
                 sync_repair_cost_price(repair)
+
+                # DİQQƏT (əsas düzəliş, video ilə göstərilən xəta): ləğv ediləndə yuxarıda (bax
+                # "if ... CANCELLED" bloku) müştərinin ödənişi REFUND kimi Kassadan çıxılır, ustaya/
+                # təchizatçıya ödənilən məbləğ isə EXPENSE_REFUND kimi geri "bərpa" olunur. Əvvəllər
+                # xidmət YENİDƏN aktivləşdiriləndə (Ləğv edildi → Təhvil verildi və s.) bu HEÇ VAXT
+                # TƏRSİNƏ ÇEVRİLMİRDİ — RepairPayment qeydi (və "Ödənilib" göstəricisi) toxunulmaz
+                # qaldığı üçün təmirin özü hələ də "ödənilib" görünürdü, AMMA Kassa balansı itirdiyi
+                # pulu BİR DAHA GERİ ALMIRDI — nəticədə hər ləğv+bərpa dövründə kassa həqiqi
+                # vəziyyətdən getdikcə geri qalırdı ("itən" pul). İndi: bu təmirə bağlı REFUND/
+                # EXPENSE_REFUND-un XALİS (hələ bərpa olunmamış) hissəsi hər ödəniş üsulu üzrə ayrıca
+                # hesablanır və tərs əməliyyatla (REFUND → INCOME, EXPENSE_REFUND → SUPPLIER_PAYMENT)
+                # bərpa olunur — #56 tələbinə uyğun, balans kifayət etmirsə (çox nadir hal, yalnız
+                # ustaya/təchizatçıya yenidən "ödəniləcək" tərəf üçün mümkündür) əməliyyat dayandırılır.
+                from collections import defaultdict
+                from finance.models import CashTransaction, TransactionType, compute_cashbox_summary, assert_sufficient_balance
+
+                # DİQQƏT: "bərpa olundu" sözü BİLƏRƏKDƏN marker kimi istifadə olunur — aşağıda
+                # YALNIZ bu sözü olan INCOME/SUPPLIER_PAYMENT yazıları "artıq bərpa edilmiş" kimi
+                # sayılır, orijinal (ilk ödəniş/ilk usta ödənişi) yazıları YOX. Əks halda — yəni
+                # bütün INCOME-u REFUND-dan çıxsaq — ilk ödəniş elə REFUND-un özü ilə "sıfırlanar"
+                # və bərpa heç vaxt yaradılmazdı (REFUND elə o ilk ödənişi ləğv etmək üçün
+                # yaradılmışdı, ona qarşı hesablanmamalıdır). Bu sayədə dəfələrlə ləğv/bərpa
+                # dövrü edilsə belə (hər dövr öz REFUND-unu yaradır), hesab düzgün qalır.
+                RESTORE_MARK = "yenidən aktivləşdirildi"
+
+                refunded_by_method: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+                already_restored_income_by_method: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+                for t in CashTransaction.objects.filter(repair=repair, type__in=[TransactionType.INCOME, TransactionType.REFUND]):
+                    if t.type == TransactionType.REFUND:
+                        refunded_by_method[t.method] += t.amount
+                    elif RESTORE_MARK in (t.description or ""):
+                        already_restored_income_by_method[t.method] += t.amount
+
+                recovered_by_method: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+                already_restored_payment_by_method: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+                for t in CashTransaction.objects.filter(repair=repair, type__in=[TransactionType.SUPPLIER_PAYMENT, TransactionType.EXPENSE_REFUND]):
+                    if t.type == TransactionType.EXPENSE_REFUND:
+                        recovered_by_method[t.method] += t.amount
+                    elif RESTORE_MARK in (t.description or ""):
+                        already_restored_payment_by_method[t.method] += t.amount
+
+                request = self.context.get("request")
+
+                # Müştəridən alınan, amma hələ bərpa olunmamış (son ləğvdə geri qaytarılan) hissə —
+                # yenidən "Kassa" (INCOME) kimi yazılır ki, balans əvvəlki kimi düzəlsin.
+                for method, refunded in refunded_by_method.items():
+                    to_restore = refunded - already_restored_income_by_method.get(method, Decimal("0"))
+                    if to_restore > 0:
+                        CashTransaction.objects.create(
+                            shop=repair.shop, branch=repair.branch, type=TransactionType.INCOME,
+                            amount=to_restore, method=method,
+                            description=f"{repair.number}, {repair.customer.full_name} — xidmət {RESTORE_MARK}, ödəniş bərpa olundu",
+                            repair=repair, created_by=getattr(request, "user", None),
+                        )
+
+                # Təchizatçıdan/ustadan "geri alınmış" sayılan, amma hələ yenidən ödənilməmiş hissə —
+                # balans kifayət edirsə yenidən Təchizatçı ödənişi kimi yazılır (kifayət etmirsə,
+                # #56-ya uyğun, bu hissə üçün əməliyyat dayandırılır).
+                for method, recovered in recovered_by_method.items():
+                    to_repay = recovered - already_restored_payment_by_method.get(method, Decimal("0"))
+                    if to_repay > 0:
+                        assert_sufficient_balance(repair.shop, to_repay, method)
+                        CashTransaction.objects.create(
+                            shop=repair.shop, branch=repair.branch, type=TransactionType.SUPPLIER_PAYMENT,
+                            amount=to_repay, method=method,
+                            description=f"{repair.number}, {repair.customer.full_name} — xidmət {RESTORE_MARK}, təchizatçı/ustaya ödəniş bərpa olundu",
+                            repair=repair, created_by=getattr(request, "user", None),
+                        )
             if changed:
                 # Hər status dəyişikliyinin vaxtı qeydə alınır ("nə vaxtdan təmir prosesindədir",
                 # "nə vaxtdan hazırdır" və s. sualları üçün — bax RepairStatusHistory).
