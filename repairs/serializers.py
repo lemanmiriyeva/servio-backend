@@ -377,10 +377,31 @@ class RepairStatusUpdateSerializer(serializers.Serializer):
                 # xidmət ləğv olunanda kassa mənfiyə düşməməlidir — yəni bu pul da geri alınmış sayılır
                 # (usta/təchizatçıdan geri tələb olunur). Ona görə eyni məbləğdə (eyni method ilə)
                 # EXPENSE_REFUND yazırıq ki, hər balans bu əməliyyatdan əvvəlki vəziyyətinə qayıtsın.
+                #
+                # DİQQƏT: "təchizatçıya nə qədər ödənilib" sualını YALNIZ bu təmirə bağlı
+                # CashTransaction-lardan (repair=repair) tapmaq KİFAYƏT DEYİL — çünki təchizatçı
+                # borcu SONRADAN Təchizatçılar səhifəsindəki "Borc ödə" ilə ödənəndə (bax:
+                # suppliers/views.py SupplierViewSet.pay), yaradılan CashTransaction heç bir
+                # repair FK-sı DAŞIMIR (FIFO ilə bir neçə alışa/təmirə bölünə bildiyi üçün) —
+                # yalnız SupplierPurchasePayment (purchase.repair ilə) bu konkret təmirə bağlıdır.
+                # Bunu nəzərə almasaq, "borcla alıb sonra borcu ödə, sonra ləğv et" ssenarisində
+                # ödənilmiş pul HEÇ VAXT geri qaytarılmır — məhz bu şikayət idi.
+                from suppliers.models import SupplierPurchasePayment
+
                 paid_out_by_method: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+                # (1) Birbaşa bu təmirə yazılan, təchizatçısız əməliyyatlar — xarici usta ödənişi
+                # (type=SUPPLIER_PAYMENT, supplier=None) və təchizatçısız "nağd/kart aldım" xərci
+                # (type=EXPENSE, supplier=None, heç bir SupplierPurchase yaradılmır).
                 for t in CashTransaction.objects.filter(
-                        repair=repair, type__in=[TransactionType.SUPPLIER_PAYMENT, TransactionType.EXPENSE]):
+                        repair=repair, type__in=[TransactionType.SUPPLIER_PAYMENT, TransactionType.EXPENSE],
+                        supplier__isnull=True):
                     paid_out_by_method[t.method] += t.amount
+                # (2) Bu təmirin təchizatçı alış(lar)ına edilmiş BÜTÜN ödənişlər — istər təmir
+                # yaradılanda dərhal (bu da ayrıca yuxarıdakı kimi CashTransaction yaradır, amma
+                # supplier dolu olduğu üçün (1)-də sayılmır, təkrar hesablanmır), istərsə də
+                # sonradan Təchizatçılar səhifəsindən borc ödənişi kimi.
+                for p in SupplierPurchasePayment.objects.filter(purchase__repair=repair):
+                    paid_out_by_method[p.method or "cash"] += p.amount
                 already_recovered_by_method: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
                 for t in CashTransaction.objects.filter(repair=repair, type=TransactionType.EXPENSE_REFUND):
                     already_recovered_by_method[t.method] += t.amount
