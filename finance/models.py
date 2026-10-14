@@ -111,6 +111,18 @@ def compute_cashbox_summary(shop):
         # Kartla/bank köçürməsi ilə olan NET hərəkət (nə qədər kartla qəbul edilib, nə qədər
         # kartla xərclənib) — məlumat üçün, "Kassa balansı"na daxil edilmir.
         "card_balance": card_income - card_expense - card_supplier_payment - card_refund + card_expense_refund,
+        # DİQQƏT: "expense"/"supplier_payment" yuxarıda YALNIZ NAĞD məbləği göstərir (çünki
+        # "Kassa balansı (nağd)" yalnız nağdı əhatə etməlidir) — amma Kassa səhifəsindəki
+        # "Xərc" / "Təchizatçı ödənişi" statistika qutularının etiketində "(nağd)" yazılmayıb,
+        # ona görə istifadəçi kartla edilmiş xərci də orada gözləyir ("kartdan çıxılan pul
+        # xərcə düşmür" şikayəti elə budur). Bu üç sahə NAĞD + KART/BANK cəmidir — statistika
+        # qutularında göstərilməlidir, balans hesablamasında YOX (current_balance yuxarıdakı
+        # kimi nağd-yalnız qalır).
+        "total_expense": expense + card_expense,
+        "total_supplier_payment": supplier_payment + card_supplier_payment,
+        "total_income": income + card_income,
+        "total_refund": refund + card_refund,
+        "total_expense_refund": expense_refund + card_expense_refund,
     }
 
 
