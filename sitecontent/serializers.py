@@ -10,7 +10,7 @@ class SiteSettingsPublicSerializer(serializers.ModelSerializer):
     class Meta:
         model = SiteSettings
         fields = ["brand_name", "tagline", "logo", "hero_title", "hero_subtitle",
-                  "email", "phone", "whatsapp", "address", "hours", "footer_note"]
+                  "email", "phone", "whatsapp", "instagram_url", "address", "hours", "footer_note"]
 
     def get_logo(self, obj):
         if not obj.logo:

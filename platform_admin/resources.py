@@ -167,7 +167,7 @@ RESOURCES = [
     Resource("home-hero", "sitecontent.SiteSettings", "Baş yazı (hero mətni)", SITE_HOME,
              ["hero_title"],
              exclude=("brand_name", "tagline", "logo", "email", "phone", "whatsapp",
-                       "address", "hours", "footer_note"),
+                       "instagram_url", "address", "hours", "footer_note"),
              section=SEC_SITE),
     Resource("home-steps", "sitecontent.HomeStep", "\"Necə işləyir\" addımları", SITE_HOME,
              ["number", "title", "order", "is_active"], section=SEC_SITE),
@@ -184,16 +184,18 @@ RESOURCES = [
     Resource("faq-items", "sitecontent.FaqItem", "FAQ sualları", SITE_FAQ,
              ["question", "order", "is_active"], section=SEC_SITE),
 
-    # -- Əlaqə: telefon/e-poçt/ünvan/iş saatları (Əlaqə səhifəsi + footer-də görünür) --
+    # -- Əlaqə: telefon/e-poçt/ünvan/iş saatları/WhatsApp/Instagram (Əlaqə səhifəsi + footer +
+    #    bütün ictimai səhifələrdəki üzən WhatsApp düyməsi buradan qidalanır) --
     Resource("contact-info", "sitecontent.SiteSettings", "Əlaqə məlumatları", SITE_CONTACT,
-             ["email", "phone", "address"],
+             ["email", "phone", "whatsapp", "instagram_url", "address"],
              exclude=("brand_name", "tagline", "logo", "hero_title", "hero_subtitle", "footer_note"),
              section=SEC_SITE),
 
     # -- Loqo və marka: bütün səhifələrdə (header/footer) görünən ümumi brendinq --
     Resource("site-branding", "sitecontent.SiteSettings", "Loqo və marka", SITE_GENERAL,
              ["brand_name", "tagline"],
-             exclude=("hero_title", "hero_subtitle", "email", "phone", "whatsapp", "address", "hours"),
+             exclude=("hero_title", "hero_subtitle", "email", "phone", "whatsapp",
+                       "instagram_url", "address", "hours"),
              section=SEC_SITE),
 ]
 
@@ -237,6 +239,7 @@ FIELD_LABELS = {
     "public_description_yearly": "İllik seçim izahı (Qiymətlər səhifəsində)",
     "max_branches": "Maks. filial", "max_users": "Maks. istifadəçi",
     "is_main": "Əsas filial", "is_owner_role": "Sahib rolu", "module": "Modul", "is_allowed": "İcazə verilib",
+    "instagram_url": "Instagram linki",
     "username": "İstifadəçi adı (giriş üçün)", "first_name": "Ad", "last_name": "Soyad", "password": "Şifrə",
     "is_platform_admin": "Platforma Super Admini (BÜTÜN mağazaları görür!)",
     "is_superuser": "Superistifadəçi (texniki bayraq, Platforma Super Admini ilə eyni təsirə malikdir)",
