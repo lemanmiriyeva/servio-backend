@@ -122,7 +122,11 @@ RESOURCES = [
     Resource("users", "accounts.User", "İstifadəçilər", PLATFORM,
              ["username", "first_name", "last_name", "shop", "role", "status",
               "is_shop_admin", "is_platform_admin"],
-             exclude=("groups", "user_permissions"),  # password: write-only, hash-lənir
+             # `is_superuser` / `is_staff`: Django-nun texniki bayraqları, panel formunda ayrıca
+             # checkbox kimi göstərilməsin deyə burada tam çıxarılır (istifadəçi yaradanda qarışıq
+             # və təhlükəli idi — eyni məqsəd üçün artıq `is_platform_admin` var). Əsl Django
+             # superuser lazım olsa, `create_superuser` management command-ı ilə verilir.
+             exclude=("groups", "user_permissions", "is_superuser", "is_staff"),  # password: write-only, hash-lənir
              # Bu 3 tarix sistemin özü tərəfindən idarə olunur (son giriş, qoşulma, son görünmə) —
              # istifadəçi yaradanda/redaktə edəndə əl ilə dəyişilməməli, formda göstərilməməlidir.
              extra_kwargs={
