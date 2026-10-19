@@ -148,21 +148,43 @@ class ReportsSummaryView(APIView):
         ).exclude(repair__status=RepairStatus.CANCELLED).select_related("repair"))
         total_sales = sum((p.amount for p in sales_rows), Decimal("0"))
 
-        # Maya dəyəri — Kassa səhifəsindəki "Təchizatçı ödənişi" qutusu ilə EYNİ məntiq
-        # (bax: finance/models.py compute_cashbox_summary və cashbox/page.tsx):
-        # SUPPLIER_PAYMENT (real xərclənən) − EXPENSE_REFUND (geri alınan). Bu, ləğv/
-        # yenidən aktivləşdirmə dövrlərində də avtomatik düzgün nəticə verir, çünki hər
-        # "bərpa" həm yeni SUPPLIER_PAYMENT, həm də əvvəlki EXPENSE_REFUND kimi qeydə
-        # alınıb — ikisi bir-birini balanslaşdırır.
-        cost_paid = (CashTransaction.objects.filter(
-            shop=shop, type=TransactionType.SUPPLIER_PAYMENT,
+        # Maya dəyəri (DÜZƏLİŞ — "borc ilə alınan hissə mənfəəti şişirdir" şikayəti):
+        # ƏVVƏLKİ versiya maya dəyərini YALNIZ təchizatçıya REAL ödəniş ediləndə (SUPPLIER_
+        # PAYMENT) tanıyırdı. Bu, detal TƏCHİZATÇIDAN BORC götürülüb təmir dərhal müştəriyə
+        # satılanda (müştəri İSƏ dərhal ödəyəndə) səhv nəticə verirdi: satış (gəlir) dərhal
+        # tanınır, maya dəyəri isə (təchizatçıya hələ ödənilmədiyi üçün) SIFIR sayılırdı —
+        # nəticədə mənfəət süni şəkildə TAM satış qədər (borcu ödəyənə qədər) şişmiş görünürdü.
+        # İstifadəçinin sözləri ilə: "mən borcu ödəməsəm belə, kassaya gələn məbləğ TAM
+        # mənfəət kimi yazılır" — bu düzgün məntiq deyil, çünki təchizatçıya olan borc HƏR
+        # HALDA real bir öhdəlikdir (geri ödəniləcək), sadəcə ödənişi gecikib.
+        #
+        # Düzgün (uyğunlaşdırma/"matching") prinsipi: hər təmirin maya dəyəri (cost_price)
+        # onun SATIŞI tanınanda — yəni müştəri ÖDƏYƏNDƏ — eyni nisbətdə tanınır, təchizatçıya
+        # REAL ödənilib-ödənilməməsindən ASILI OLMAYARAQ. Təchizatçıya olan borc ayrıca,
+        # özünün yerində ("supplier_debt_total" və "Təchizatçılar üzrə borc" cədvəli ilə)
+        # göstərilməyə davam edir — bu DƏYİŞMİR, sadəcə artıq mənfəəti SÜNİ ŞİŞİRTMİR.
+        # Hissəvi ödənişlərdə maya dəyəri ödənilən hissəyə MÜTƏNASİB tanınır (məs. satış
+        # 100 AZN, maya 40 AZN, indi 50 AZN ödənilirsə — bu ödənişlə 20 AZN maya "açılır").
+        #
+        # Təmirlə ƏLAQƏSİ OLMAYAN təchizatçı ödənişləri (məs. ümumi anbar doldurulması, heç
+        # bir konkret satışla "qarşılaşdırılası" olmayan) köhnə qayda ilə — REAL ödənildiyi
+        # an (cash-basis) — qalır, çünki bunların qarşılığında burada hesablanan bir "satış"
+        # yoxdur ki, maya dəyərini onunla eyni ana "bağlayaq".
+        cost_from_repairs = Decimal("0")
+        for p in sales_rows:
+            r = p.repair
+            if r.sale_price and r.cost_price:
+                cost_from_repairs += (r.cost_price * p.amount / r.sale_price)
+
+        cost_paid_unrelated = (CashTransaction.objects.filter(
+            shop=shop, type=TransactionType.SUPPLIER_PAYMENT, repair__isnull=True,
             created_at__date__gte=start, created_at__date__lte=end,
         ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
         cost_recovered = (CashTransaction.objects.filter(
-            shop=shop, type=TransactionType.EXPENSE_REFUND,
+            shop=shop, type=TransactionType.EXPENSE_REFUND, repair__isnull=True,
             created_at__date__gte=start, created_at__date__lte=end,
         ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
-        total_cost = cost_paid - cost_recovered
+        total_cost = cost_from_repairs + cost_paid_unrelated - cost_recovered
 
         expenses = (CashTransaction.objects.filter(
             shop=shop, type=TransactionType.EXPENSE, created_at__date__gte=start, created_at__date__lte=end
@@ -235,24 +257,15 @@ class ReportsSummaryView(APIView):
             by_service_sales[key] += p.amount
             by_service_repairs[key].add(p.repair_id)
 
-        # DİQQƏT: ləğv olunmuş təmirlər satış tərəfindən artıq çıxarılıb (yuxarı,
-        # sales_rows.exclude(status=CANCELLED)) — maya dəyəri tərəfi də eyni qaydaya
-        # tabe olmalıdır, əks halda ləğv zamanı yaranan EXPENSE_REFUND (xərcin geri
-        # alınması) bu artıq mövcud olmayan xidmətin sətirində "mənfi xərc" kimi qalıb
-        # qalır (məhz "6544" sətrinin boş/səhv görünməsinin səbəbi budur).
+        # Maya dəyəri bölgüsü də yuxarıdakı eyni uyğunlaşdırma (matching) qaydası ilə —
+        # ödənişə MÜTƏNASİB, təchizatçıya real ödənilib-ödənilməməsindən asılı olmadan
+        # (bax: yuxarıdakı `cost_from_repairs` izahı). sales_rows artıq ləğv olunmuş
+        # təmirləri çıxarıb, ona görə burda əlavə bir "cancelled" filtri lazım deyil.
         by_service_cost: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-        for t in CashTransaction.objects.filter(
-                shop=shop, type=TransactionType.SUPPLIER_PAYMENT, repair__isnull=False,
-                created_at__date__gte=start, created_at__date__lte=end
-        ).exclude(repair__status=RepairStatus.CANCELLED).select_related("repair"):
-            by_service_cost[t.repair.issue_description] += t.amount
-            by_service_repairs[t.repair.issue_description].add(t.repair_id)
-        for t in CashTransaction.objects.filter(
-                shop=shop, type=TransactionType.EXPENSE_REFUND, repair__isnull=False,
-                created_at__date__gte=start, created_at__date__lte=end
-        ).exclude(repair__status=RepairStatus.CANCELLED).select_related("repair"):
-            by_service_cost[t.repair.issue_description] -= t.amount
-            by_service_repairs[t.repair.issue_description].add(t.repair_id)
+        for p in sales_rows:
+            r = p.repair
+            if r.sale_price and r.cost_price:
+                by_service_cost[r.issue_description] += (r.cost_price * p.amount / r.sale_price)
 
         # Ləğv olunub geri qaytarılan (xərc + geri qaytarma bir-birini tam sıfırlayan)
         # və heç bir ödəniş almayan xidmətlər cədvəldə "0 ədəd · 0 AZN" kimi boş sətir

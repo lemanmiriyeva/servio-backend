@@ -42,6 +42,11 @@ class SiteSettings(models.Model):
     phone = models.CharField(max_length=32, default="+994 50 000 00 00")
     whatsapp = models.CharField(max_length=20, default="994500000000",
                                  help_text="wa.me üçün, + və boşluqsuz")
+    instagram_url = models.URLField(
+        max_length=300, blank=True,
+        default="https://www.instagram.com/serviocrm?xtok=MWtrcGE1eDB4eXlrMQ==",
+        help_text="Instagram profilinin tam linki",
+    )
     address = models.CharField(max_length=200, default="Bakı, Azərbaycan")
     hours = models.CharField(max_length=120, default="Bazar ertəsi – Şənbə, 09:00 – 18:00")
 
