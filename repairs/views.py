@@ -67,6 +67,11 @@ def _render_warranty_pdf(repair):
         "warranty_end": _fmt_date(repair.warranty_end_date),
         "service_phone": shop.phone,
         "service_address": shop.address,
+        # DÜZƏLİŞ: mağazanın Tənzimləmələr səhifəsində özünün yazdığı "Zəmanət və
+        # təhvil-təslim şərtləri" mətni (shop.receipt_terms) əvvəllər bura heç ötürülmürdü —
+        # nəticədə PDF-də HƏR mağaza üçün eyni, sabit (hardcoded) mətn çıxırdı, mağazanın
+        # özünün yazdığı bəndlər (1, 2, 3, 4...) görünmürdü.
+        "warranty_terms": shop.receipt_terms,
     })
     buf = io.BytesIO()
     try:
