@@ -148,6 +148,21 @@ class ReportsSummaryView(APIView):
         ).exclude(repair__status=RepairStatus.CANCELLED).select_related("repair"))
         total_sales = sum((p.amount for p in sales_rows), Decimal("0"))
 
+        # Kassa səhifəsindən ƏL İLƏ (heç bir təmirə bağlı olmadan) əlavə edilən "Kassa"
+        # (INCOME) əməliyyatları — məs. əlavə xidmət haqqı, aksesuar satışı və s. — ƏVVƏLLƏR
+        # bu hesabata HEÇ DÜŞMÜRDÜ, çünki yuxarıdakı total_sales YALNIZ RepairPayment-dən
+        # (yəni konkret təmirə bağlı ödənişlərdən) hesablanırdı. İstifadəçinin şikayəti:
+        # "kassada 40 manat kart gəliri əlavə etdim, kart balansına düşdü, amma xalis
+        # mənfəətə düşmədi". DÜZƏLİŞ: belə əl-ilə-gəlir sətirləri (repair=NULL) də satışa
+        # (və buradan həm total_profit-ə, həm də net_profit-ə) əlavə olunur. Nağd/kart
+        # fərqi YOXDUR — hər ikisi eyni şəkildə mənfəətə düşür (istifadəçinin tələbi elə budur),
+        # ona görə `method` üzrə filtr qoyulmur.
+        manual_income = (CashTransaction.objects.filter(
+            shop=shop, type=TransactionType.INCOME, repair__isnull=True,
+            created_at__date__gte=start, created_at__date__lte=end,
+        ).aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+        total_sales += manual_income
+
         # Maya dəyəri (DÜZƏLİŞ — "borc ilə alınan hissə mənfəəti şişirdir" şikayəti):
         # ƏVVƏLKİ versiya maya dəyərini YALNIZ təchizatçıya REAL ödəniş ediləndə (SUPPLIER_
         # PAYMENT) tanıyırdı. Bu, detal TƏCHİZATÇIDAN BORC götürülüb təmir dərhal müştəriyə
