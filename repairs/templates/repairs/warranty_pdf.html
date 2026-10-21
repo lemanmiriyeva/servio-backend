@@ -580,12 +580,12 @@ body {
             Zəmanət və təhvil-təslim şərtləri
         </div>
 
-        {# DÜZƏLİŞ (müştəri şikayəti: "Tənzimləmələrdə yazdığım 1,2,3,4 bəndlər PDF-də yoxdur"):
+        {% comment %} DÜZƏLİŞ (müştəri şikayəti: "Tənzimləmələrdə yazdığım 1,2,3,4 bəndlər PDF-də yoxdur"):
            ƏVVƏLKİ versiya burada HƏR mağaza üçün EYNİ, sabit (hardcoded) "ekran zəmanəti"
            mətnini göstərirdi — mağazanın "Tənzimləmələr → Qəbz məlumatları → Zəmanət və
            təhvil-təslim şərtləri" sahəsində özünün yazdığı mətn heç vaxt bura ötürülmürdü.
            İndi mağazanın öz mətni (`shop.receipt_terms`) göstərilir; sahə boşdursa, köhnə
-           ümumi mətn ehtiyat (fallback) kimi qalır ki, PDF-də bu bölmə birdən-birə boş qalmasın. #}
+           ümumi mətn ehtiyat (fallback) kimi qalır ki, PDF-də bu bölmə birdən-birə boş qalmasın. {% endcomment %}
         <p class="terms-text">{% if warranty_terms %}{{ warranty_terms }}{% else %}Zəmanət yalnız görülən işə və dəyişdirilən detala şamil olur, cihazın digər hissələrinə aid deyil. Fiziki zədə, maye təması və üçüncü şəxs müdaxiləsi zəmanəti ləğv edir.{% endif %}</p>
 
     </div>

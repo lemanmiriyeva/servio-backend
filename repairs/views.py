@@ -41,11 +41,22 @@ def _render_warranty_pdf(repair):
         path = finders.find(f"repairs/fonts/{name}")
         return pathlib.Path(path).as_uri() if path else ""
 
+    # DÜZƏLİŞ ("PDF-də saat tamamilə fərqli görünür"): verilənlər bazasından gələn DateTimeField
+    # UTC-dir; əvvəl birbaşa strftime olunurdu və Bakı vaxtından 4 saat geri göstərilirdi
+    # (gecə 00:00–04:00 arası tarix də bir gün əvvələ düşürdü). İndi mağaza vaxt qurşağına
+    # (settings.TIME_ZONE = Asia/Baku) çevrilir. Sadə DateField-lərə (warranty_started_at) toxunulmur.
+    def _local(dt):
+        import datetime as _dt
+        from django.utils import timezone as _tz
+        if isinstance(dt, _dt.datetime) and _tz.is_aware(dt):
+            return _tz.localtime(dt)
+        return dt
+
     def _fmt_date(dt):
-        return dt.strftime("%d.%m.%Y") if dt else "—"
+        return _local(dt).strftime("%d.%m.%Y") if dt else "—"
 
     def _fmt_time(dt):
-        return dt.strftime("%H:%M") if dt else ""
+        return _local(dt).strftime("%H:%M") if dt else ""
 
     shop = repair.shop
     html = render_to_string("repairs/warranty_pdf.html", {

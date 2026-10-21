@@ -348,7 +348,7 @@ class RepairStatusUpdateSerializer(serializers.Serializer):
             repair.status = new_status
             if new_status == RepairStatus.DELIVERED and not repair.delivered_at:
                 repair.delivered_at = timezone.now()
-                repair.warranty_started_at = timezone.now().date()
+                repair.warranty_started_at = timezone.localdate()  # Bakı tarixi (UTC yox)
             repair.save()
             if changed and new_status == RepairStatus.CANCELLED:
                 # Təmir ləğv edilir — ona bağlı təchizatçı alışları da "ləğv edildi" kimi işarələnir
