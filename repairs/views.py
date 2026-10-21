@@ -101,6 +101,12 @@ class RepairOrderViewSet(ShopScopedQuerysetMixin, viewsets.ModelViewSet):
     def get_serializer_class(self):
         return RepairOrderDetailSerializer if self.action != "list" else RepairOrderListSerializer
 
+    def perform_destroy(self, instance):
+        # Silinmiş əməliyyatlar jurnalına "kim sildi" yazılsın deyə.
+        from finance.oplog import deletion_actor
+        with deletion_actor(self.request.user):
+            instance.delete()
+
     @action(detail=False, methods=["get"], url_path="device-suggestions")
     def device_suggestions(self, request):
         """

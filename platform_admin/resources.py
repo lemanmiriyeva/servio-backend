@@ -449,7 +449,9 @@ def build_viewset(res: Resource):
             if model is apps.get_model("accounts.User") and obj.pk == request.user.pk:
                 return Response({"detail": "Öz hesabınızı silə bilməzsiniz."}, status=status.HTTP_400_BAD_REQUEST)
             try:
-                obj.delete()
+                from finance.oplog import deletion_actor
+                with deletion_actor(request.user):
+                    obj.delete()
             except (ProtectedError, RestrictedError):
                 return Response(
                     {"detail": "Bu qeyd başqa məlumatlarla bağlıdır, silinə bilməz."},

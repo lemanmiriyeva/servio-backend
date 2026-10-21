@@ -66,6 +66,27 @@ class CashboxOpeningBalance(models.Model):
         ordering = ["-as_of_date"]
 
 
+class OperationLog(models.Model):
+    """
+    Silinmiş əməliyyatların jurnalı (yalnız Mağaza Admininə görünür). Təmir/kassa sətri
+    silinəndə, silinməzdən ƏVVƏL onun tam "şəkli" (snapshot) burada saxlanılır ki, admin
+    sonradan nəyin, kim tərəfindən, nə vaxt silindiyini və maliyyəyə təsirini görə bilsin.
+    """
+    KIND_CHOICES = [("repair", "Təmir / xidmət"), ("cash", "Kassa əməliyyatı")]
+
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name="operation_logs")
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES)
+    title = models.CharField(max_length=255)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    details = models.TextField(blank=True, help_text="JSON — silinən qeydin tam məlumatı")
+    deleted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    deleted_by_name = models.CharField(max_length=150, blank=True)
+    deleted_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-deleted_at", "-id"]
+
+
 def compute_cashbox_summary(shop):
     """
     Kassa səhifəsi VƏ ana səhifə eyni bu funksiyadan istifadə edir ki, 'kassa balansı'
